@@ -104,6 +104,7 @@ canvas#ovcanvas,canvas#drcanvas{background:#fff;border:1px solid var(--bd);borde
 .popmenu .mi.on::before{content:'✓';margin-left:-8px;width:0}
 .popmenu .sep{height:1px;background:var(--bd);margin:4px 0}
 .msw{display:inline-block;width:36px;height:10px;border-radius:2px;border:1px solid #0001}
+.mkcell{display:flex;align-items:center;gap:8px}.mk{width:150px;border:1px solid var(--bd);border-radius:4px;padding:2px 6px;font-weight:600}
 kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;font-size:11px}
 </style>
 </head>
@@ -118,7 +119,7 @@ kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;
     <button class="tab" data-tab="stats">Statistics</button>
     <button class="tab" data-tab="overlay">Overlays</button>
     <button class="tab" data-tab="dr">tSNE / UMAP</button>
-    <button class="tab" data-tab="scales">Scales &amp; compensation</button>
+    <button class="tab" data-tab="scales">Markers, scales &amp; compensation</button>
   </span>
   <span class="sp"></span><span id="status"></span>
   <button onclick="saveFile('workspace_' + new Date().toISOString().slice(0,10) + '.json', JSON.stringify(workspaceJSON(), null, 1))" title="Save gates, scales and plots">Save workspace</button>
@@ -187,7 +188,7 @@ kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;
         <div><div id="drprog" class="muted"></div><div id="drlegend"></div><canvas id="drcanvas"></canvas></div></div>
     </section>
     <section class="view" id="v-scales" hidden>
-      <div class="toolbar"><b>Axis scales</b><span class="muted">&nbsp;apply to all samples. Biex matches FlowJo's biexponential (top / positive decades / width basis).</span></div>
+      <div class="toolbar"><b>Markers &amp; axis scales</b><span class="muted">&nbsp;Type the antibody/marker used on each detector (also: double-click a channel chip, or click an axis name → Rename). Scales apply to all samples. Biex matches FlowJo's biexponential (top / positive decades / width basis).</span></div>
       <div id="scaletable"></div>
       <h3 style="margin:18px 0 6px">Compensation</h3>
       <div id="comp"></div>
@@ -392,14 +393,17 @@ const S = {
   comp: { enabled: false, params: [], matrix: [] },
   gates: [],            // {id,name,parent,type,x,y,geom,overrides:{},quadId,color}
   plots: [],
-  cur: 0, ver: 1, selGate: null, perSample: false,
+  cur: 0, ver: 1, selGate: null, perSample: false, markers: {},
   stats: { pops: [], chans: [], kinds: ['count', 'pctParent', 'median'] },
 };
 let _id = 1; const uid = p => p + (_id++) + '_' + Math.random().toString(36).slice(2, 6);
 const bump = () => { S.ver++; };
 const curSample = () => S.samples[S.cur];
 const chan = name => S.channels.find(c => c.name === name);
-const chanLabel = name => { const c = chan(name); return c ? c.label : name; };
+const detBase = name => name.replace(/-(A|H|W)$/i, '');
+function markerOf(name) { const c = chan(name); if (!c) return ''; const m = S.markers[name] !== undefined ? S.markers[name] : S.markers[detBase(name)]; return m !== undefined ? m : shortStain(c.stain, c.name); }
+const chanLabel = name => { const c = chan(name); if (!c) return name; if (c.derived) return c.name; const m = markerOf(name); return m ? `${m} :: ${name}` : name; };
+function setMarker(name, marker) { const base = detBase(name); marker = (marker || '').trim(); delete S.markers[name]; S.markers[base] = marker; for (const c of S.channels) if (detBase(c.name) === base) delete S.markers[c.name]; }
 const gateById = id => S.gates.find(g => g.id === id);
 const childrenOf = id => S.gates.filter(g => g.parent === id);
 function gatePath(g) { const p = []; while (g) { p.unshift(g.name); g = gateById(g.parent); } return p.join(' / '); }
@@ -865,7 +869,7 @@ function popOptions(sel) {
 }
 function chanOptions(sel, allowNone) {
   const out = allowNone ? [h('option', { value: '', selected: !sel }, '— Histogram —')] : [];
-  S.channels.forEach(c => out.push(h('option', { value: c.name, selected: sel === c.name }, c.label))); return out;
+  S.channels.forEach(c => out.push(h('option', { value: c.name, selected: sel === c.name }, chanLabel(c.name)))); return out;
 }
 const PSIZE = 330;
 function buildPlotPanels() {
@@ -1015,7 +1019,7 @@ function attachPlotEvents(p, cv) {
     if (tool === 'quad') {
       if (hist()) { toast('Quadrants need a 2-D plot'); return; }
       const t = toT(q); const cx = S.T[p.x].inv(t[0]), cy = S.T[p.y].inv(t[1]); const qid = uid('q');
-      const xs = shortStain(chan(p.x).stain, p.x) || p.x, ys = shortStain(chan(p.y).stain, p.y) || p.y;
+      const xs = markerOf(p.x) || p.x, ys = markerOf(p.y) || p.y;
       const names = [`Q1: ${xs}- ${ys}+`, `Q2: ${xs}+ ${ys}+`, `Q3: ${xs}+ ${ys}-`, `Q4: ${xs}- ${ys}-`];
       for (let k = 0; k < 4; k++) S.gates.push({ id: uid('g'), name: names[k], parent: p.pop || null, type: 'quad', x: p.x, y: p.y, geom: { cx, cy, q: k }, overrides: {}, quadId: qid, color: nextColor() });
       bump(); setTool('select'); refreshAll(); return;
@@ -1038,7 +1042,7 @@ function attachPlotEvents(p, cv) {
 }
 async function createGate(p, def) {
   const n = S.gates.length + 1;
-  const name = await askText('Name this population', def.type === 'range' ? `${shortStain(chan(p.x).stain, p.x) || p.x}+` : `Gate ${n}`);
+  const name = await askText('Name this population', def.type === 'range' ? `${markerOf(p.x) || p.x}+` : `Gate ${n}`);
   if (!name) { renderPlot(p); return; }
   const g = Object.assign({ id: uid('g'), name, parent: p.pop || null, x: p.x, y: (p.kind === 'hist' || !p.y) ? null : p.y, overrides: {}, color: nextColor() }, def);
   if (S.perSample) { g.overrides[curSample().name] = g.geom; }
@@ -1104,7 +1108,7 @@ function renderStats() {
   cfg.append(
     box('Populations', popList().map(({ g, d }) => h('label', { class: 'ck', style: `padding-left:${d * 12}px` }, h('input', { type: 'checkbox', checked: st.pops.includes(g.id), onchange: e => { st.pops = e.target.checked ? [...st.pops, g.id] : st.pops.filter(x => x !== g.id); renderStatsTable(); autosave(); } }), g.name))),
     box('Statistics', Object.entries(STAT_KINDS).map(([k, v]) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.kinds.includes(k), onchange: e => { st.kinds = e.target.checked ? [...st.kinds, k] : st.kinds.filter(x => x !== k); renderStatsTable(); autosave(); } }), v.label))),
-    box('Channels (for MFI etc.)', S.channels.map(c => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.chans.includes(c.name), onchange: e => { st.chans = e.target.checked ? [...st.chans, c.name] : st.chans.filter(x => x !== c.name); renderStatsTable(); autosave(); } }), c.label))));
+    box('Channels (for MFI etc.)', S.channels.map(c => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: st.chans.includes(c.name), onchange: e => { st.chans = e.target.checked ? [...st.chans, c.name] : st.chans.filter(x => x !== c.name); renderStatsTable(); autosave(); } }), chanLabel(c.name)))));
   renderStatsTable();
 }
 function statsMatrix() {
@@ -1121,7 +1125,7 @@ function renderStatsTable() {
   const host = $('#stattable'); host.innerHTML = '';
   if (!S.gates.length) { host.append(h('p', { class: 'muted' }, 'Draw some gates first: statistics are calculated per population.')); return; }
   const { cols, rows } = statsMatrix();
-  const t = h('table', { class: 'st' }, h('thead', {}, h('tr', {}, h('th', {}, 'Sample'), cols.map(c => h('th', { title: colName(c) }, h('div', { class: 'cpop' }, c.g.name), h('div', { class: 'ck2' }, STAT_KINDS[c.k].label + (c.c ? ' · ' + (shortStain(chan(c.c).stain, c.c) || c.c) : '')))))),
+  const t = h('table', { class: 'st' }, h('thead', {}, h('tr', {}, h('th', {}, 'Sample'), cols.map(c => h('th', { title: colName(c) }, h('div', { class: 'cpop' }, c.g.name), h('div', { class: 'ck2' }, STAT_KINDS[c.k].label + (c.c ? ' · ' + (markerOf(c.c) || c.c) : '')))))),
     h('tbody', {}, rows.map(r => h('tr', { class: S.samples[S.cur] === r.s ? 'cur' : '' }, h('td', { class: 'sname' }, r.s.name), r.vals.map((v, i) => h('td', {}, fmtStat(cols[i].k, v)))))));
   host.append(t);
 }
@@ -1176,7 +1180,7 @@ const hex2rgb = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), 
 // ---------- Scales & compensation ----------
 function renderScales() {
   const host = $('#scaletable'); host.innerHTML = '';
-  const rows = S.channels.filter(c => !c.derived || true).map(c => {
+  const rows = S.channels.map(c => {
     const cfg = S.transforms[c.name];
     const num = (k, step) => h('input', { type: 'number', step: step || 'any', value: cfg[k], class: 'num', onchange: e => { cfg[k] = parseFloat(e.target.value); try { setTransform(c.name, cfg); autosave(); } catch (er) { toast(er.message); } } });
     const typeSel = h('select', { onchange: e => { const t = e.target.value; let n; const top = cfg.max || c.range;
@@ -1187,15 +1191,16 @@ function renderScales() {
     else if (cfg.type === 'log') params = [h('span', {}, 'min '), num('min'), h('span', {}, ' max '), num('max')];
     else if (cfg.type === 'asinh') params = [h('span', {}, 'cofactor '), num('cof'), h('span', {}, ' min '), num('min'), h('span', {}, ' max '), num('max')];
     else params = [h('span', { title: 'Top of scale' }, 'top '), num('max'), h('span', { title: 'Positive decades' }, ' pos '), num('pos', 0.05), h('span', { title: 'Extra negative decades' }, ' neg '), num('neg', 0.1), h('span', { title: 'Width basis (more negative = wider linear region around 0)' }, ' width '), num('width', 10)];
-    return h('tr', {}, h('td', {}, c.label), h('td', {}, typeSel), h('td', { class: 'pp' }, params),
+    const mk = c.derived ? h('span', {}, c.name) : h('div', { class: 'mkcell' }, h('input', { type: 'text', class: 'mk', value: markerOf(c.name), placeholder: 'marker / antibody', title: 'Marker or antibody on this detector (applies to -H and -A)', onchange: e => { setMarker(c.name, e.target.value); afterRename(); } }), h('span', { class: 'muted' }, c.name));
+    return h('tr', {}, h('td', {}, mk), h('td', {}, typeSel), h('td', { class: 'pp' }, params),
       h('td', {}, h('button', { class: 'mini', title: 'Auto (default for this channel)', onclick: () => { const s = S.samples.find(s => s.pIndex[c.name] !== undefined); if (!s) return; setTransform(c.name, defaultTransform(s.fcs.params[s.pIndex[c.name]], s)); renderScales(); autosave(); } }, 'auto')));
   });
-  host.append(h('table', { class: 'st sc' }, h('thead', {}, h('tr', {}, h('th', {}, 'Channel'), h('th', {}, 'Scale'), h('th', {}, 'Parameters'), h('th', {}, ''))), h('tbody', {}, rows)));
+  host.append(h('table', { class: 'st sc' }, h('thead', {}, h('tr', {}, h('th', {}, 'Marker / antibody · channel'), h('th', {}, 'Scale'), h('th', {}, 'Parameters'), h('th', {}, ''))), h('tbody', {}, rows)));
   // compensation
   const ch = $('#comp'); ch.innerHTML = '';
   const cp = S.comp;
   if (!cp.params.length) { ch.append(h('p', { class: 'muted' }, 'No spillover matrix was found in these files.')); return; }
-  const lab = n => shortStain((chan(n) || {}).stain, n) || n;
+  const lab = n => markerOf(n) || n;
   const tbl = h('table', { class: 'st comp' }, h('thead', {}, h('tr', {}, h('th', {}, 'Spill from ↓ into →'), cp.params.map(p => h('th', {}, lab(p), h('br'), h('small', {}, p))))),
     h('tbody', {}, cp.params.map((p, i) => h('tr', {}, h('th', {}, lab(p), ' ', h('small', {}, p)), cp.params.map((q, j) => h('td', {}, h('input', { type: 'number', step: 0.1, class: 'num' + (i === j ? ' diag' : ''), value: +(cp.matrix[i][j] * 100).toFixed(3), disabled: i === j, onchange: e => { cp.matrix[i][j] = parseFloat(e.target.value) / 100; cp.ver++; bump(); autosave(); } }), '%'))))));
   const ident = cp.matrix.every((r, i) => r.every((v, j) => i === j ? v === 1 : v === 0));
@@ -1238,11 +1243,12 @@ async function entriesToFiles(items) {
 }
 
 // ---------- workspace save/load ----------
-function workspaceJSON() { return { app: 'DrorLabFlow', version: 1, saved: new Date().toISOString(), transforms: S.transforms, comp: { enabled: S.comp.enabled, params: S.comp.params, matrix: S.comp.matrix }, gates: S.gates, plots: S.plots, stats: S.stats, samples: S.samples.map(s => s.fileName) }; }
+function workspaceJSON() { return { app: 'DrorLabFlow', version: 1, saved: new Date().toISOString(), transforms: S.transforms, comp: { enabled: S.comp.enabled, params: S.comp.params, matrix: S.comp.matrix }, markers: S.markers, gates: S.gates, plots: S.plots, stats: S.stats, samples: S.samples.map(s => s.fileName) }; }
 function loadWorkspace(w) {
   if (!w || w.app !== 'DrorLabFlow') throw new Error('not a Dror Lab Flow workspace');
   for (const k in w.transforms) if (S.transforms[k] || chan(k)) S.transforms[k] = w.transforms[k];
   S.comp.enabled = w.comp.enabled; if (w.comp.params && w.comp.params.length) { S.comp.params = w.comp.params; S.comp.matrix = w.comp.matrix; } S.comp.ver++;
+  S.markers = w.markers || S.markers || {};
   S.gates = w.gates || []; S.plots = (w.plots || []).filter(p => chan(p.x)); S.stats = w.stats || S.stats; S.selGate = null;
   rebuildT(); buildPlotPanels(); refreshAll();
 }
@@ -1255,6 +1261,12 @@ function offerRestore() {
     h('button', { class: 'pri', onclick: () => { loadWorkspace(w); bar.hidden = true; } }, 'Restore'), h('button', { onclick: () => bar.hidden = true }, 'No'));
 }
 
+async function renameMarker(name) {
+  const base = detBase(name); const sibs = S.channels.filter(c => detBase(c.name) === base).map(c => c.name).join(', ');
+  const v = await askText(`Marker / antibody for ${sibs}`, markerOf(name));
+  if (v === null) return; setMarker(name, v); afterRename();
+}
+function afterRename() { buildPlotPanels(); renderSidebar(); refreshActive(); autosave(); }
 // ---------- popup menus ----------
 function closeMenu() { const m = $('#popmenu'); if (m) m.remove(); }
 function popMenu(x, y, items) {
@@ -1276,7 +1288,8 @@ function setAxis(p, ax, ch) {
 function chanMenu(p, ax, x, y) {
   const cur = ax === 'x' ? p.x : p.y; const items = [{ header: (ax === 'x' ? 'X' : 'Y') + ' axis' }];
   const groups = [['Scatter', S.channels.filter(c => isScatter(c.name) && !c.derived)], ['Fluorescence', S.channels.filter(c => !isScatter(c.name) && !c.derived)], ['Derived', S.channels.filter(c => c.derived)]];
-  for (const [g, list] of groups) { if (!list.length) continue; items.push({ header: g }); for (const c of list) { const st = shortStain(c.stain, c.name); items.push({ label: st || c.name, sub: st ? c.name : '', on: cur === c.name, do: () => setAxis(p, ax, c.name) }); } }
+  for (const [g, list] of groups) { if (!list.length) continue; items.push({ header: g }); for (const c of list) { const st = markerOf(c.name); items.push({ label: st || c.name, sub: st ? c.name : '', on: cur === c.name, do: () => setAxis(p, ax, c.name) }); } }
+  if (cur && !(chan(cur) || {}).derived) { items.push('-'); items.push({ label: `Rename marker of ${cur}…`, do: () => renameMarker(cur) }); }
   if (ax === 'y') { items.push('-'); items.push({ label: 'Histogram (no Y)', on: !p.y || p.kind === 'hist', do: () => { p.y = null; p.kind = 'hist'; buildPlotPanels(); renderAllPlots(); autosave(); } }); }
   popMenu(x, y, items);
 }
@@ -1295,8 +1308,8 @@ function plotMenu(p, x, y) {
 function renderChips() {
   const host = $('#chips'); if (!host) return; host.innerHTML = '';
   host.append(h('span', { class: 'muted' }, 'Drag onto an axis:'));
-  for (const c of S.channels) { const st = shortStain(c.stain, c.name);
-    host.append(h('span', { class: 'chip' + (isScatter(c.name) ? ' scat' : ''), draggable: 'true', title: c.label, ondragstart: e => { e.dataTransfer.setData('text/x-channel', c.name); e.dataTransfer.effectAllowed = 'copy'; } }, st || c.name, st ? h('small', {}, ' ' + c.name.slice(-2)) : null)); }
+  for (const c of S.channels) { const st = markerOf(c.name);
+    host.append(h('span', { class: 'chip' + (isScatter(c.name) ? ' scat' : ''), draggable: 'true', title: chanLabel(c.name) + (c.derived ? '' : '\n(double-click to rename the marker)'), ondblclick: () => { if (!c.derived) renameMarker(c.name); }, ondragstart: e => { e.dataTransfer.setData('text/x-channel', c.name); e.dataTransfer.effectAllowed = 'copy'; } }, st || c.name, st ? h('small', {}, ' ' + c.name.slice(-2)) : null)); }
 }
 
 // ===================== tSNE / UMAP =====================
@@ -1317,7 +1330,7 @@ function renderDRUI() {
       h('label', {}, 'events per sample ', num('per', { min: 100, max: 50000, step: 100 })),
       h('div', { class: 'muted small' }, DR.method === 'tsne' ? 'tSNE here is exact (slow): keep the total under ~4,000 events.' : 'UMAP handles up to ~30–50k events in total.')),
     h('div', { class: 'cbox' }, h('div', { class: 'ct' }, 'Population'), h('select', { onchange: e => DR.pop = e.target.value || null }, popOptions(DR.pop))),
-    h('div', { class: 'cbox' }, h('div', { class: 'ct' }, 'Parameters'), S.channels.filter(ch => !/^(UMAP|tSNE)-/.test(ch.name)).map(ch => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: DR.params.includes(ch.name), onchange: e => { DR.params = e.target.checked ? [...DR.params, ch.name] : DR.params.filter(x => x !== ch.name); } }), ch.label))),
+    h('div', { class: 'cbox' }, h('div', { class: 'ct' }, 'Parameters'), S.channels.filter(ch => !/^(UMAP|tSNE)-/.test(ch.name)).map(ch => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: DR.params.includes(ch.name), onchange: e => { DR.params = e.target.checked ? [...DR.params, ch.name] : DR.params.filter(x => x !== ch.name); } }), chanLabel(ch.name)))),
     h('div', { class: 'cbox' }, h('div', { class: 'ct' }, 'Samples'), S.samples.map((s, i) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: DR.sel.includes(s.id), onchange: e => { DR.sel = e.target.checked ? [...DR.sel, s.id] : DR.sel.filter(x => x !== s.id); } }), h('span', { class: 'sw', style: `background:${PALETTE[i % PALETTE.length]}` }), s.name))),
     h('button', { class: 'pri big', disabled: DR.running, onclick: runDR }, DR.running ? 'Running…' : `Run ${DR.method === 'umap' ? 'UMAP' : 'tSNE'}`));
   drawDR();
@@ -1385,7 +1398,7 @@ function drawDR() {
   }
   ctx.restore(); drawAxes(ctx, W, H, a, b);
   // legend + color control
-  const opts = [['sample', 'Sample'], ['density', 'Density'], ...S.channels.filter(c => !c.derived).map(c => [c.name, c.label]), ...S.gates.map(g => ['gate:' + g.id, 'Gate: ' + g.name])];
+  const opts = [['sample', 'Sample'], ['density', 'Density'], ...S.channels.filter(c => !c.derived).map(c => [c.name, chanLabel(c.name)]), ...S.gates.map(g => ['gate:' + g.id, 'Gate: ' + g.name])];
   leg.append(h('label', {}, 'Colour by ', h('select', { onchange: e => { DR.colorBy = e.target.value; drawDR(); } }, opts.map(([v, l]) => h('option', { value: v, selected: DR.colorBy === v }, l)))),
     h('button', { onclick: () => { showTab('gating'); addPlot({ pop: r.pop, x: a, y: b, kind: 'pseudo' }); toast(`Draw gates on ${a}/${b} like any other plot (each sample shows its own events)`); } }, 'Gate on this map ↗'),
     h('button', { onclick: async () => saveFile(`${r.method}.png`, await canvasBlob(cv)) }, '⤓ PNG'));

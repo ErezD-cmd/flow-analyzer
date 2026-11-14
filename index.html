@@ -164,6 +164,7 @@ kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;
         <button class="tool" data-tool="poly" title="Polygon gate (P): click points, click the first point or double-click to close"><svg viewBox="0 0 16 16"><path d="M2 12L4 3l6 2 4-2-1 9z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Polygon</button>
         <button class="tool" data-tool="quad" title="Quadrant gate (Q): click the centre"><svg viewBox="0 0 16 16"><path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.6"/></svg>Quadrant</button>
         <button class="tool" data-tool="range" title="Range gate on a histogram (H)"><svg viewBox="0 0 16 16"><path d="M2 14V5M14 14V5M2 5h12" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Range</button>
+        <button class="tool" data-tool="zoom" title="Zoom (Z): drag a box to zoom in, click to zoom in, double-click to reset. Drag empty space with Select to pan. ⌘/Ctrl + scroll also zooms."><svg viewBox="0 0 16 16"><circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10l4.5 4.5M4.5 6.5h4M6.5 4.5v4" stroke="currentColor" stroke-width="1.6"/></svg>Zoom</button>
         <label class="ck" style="margin-left:10px" title="When ticked, gates you draw or move change only the current sample (marked * in the tree)"><input type="checkbox" id="persample"> Edit gates for this sample only</label>
         <span class="sp"></span>Sample:<span id="cursample"></span>
       </div>
@@ -638,6 +639,10 @@ let _ci = 0; const nextColor = () => PALETTE[(_ci++) % PALETTE.length];
 // ===================== plotting =====================
 'use strict';
 const M = { l: 54, r: 10, t: 10, b: 40 };
+const FULLV = { x0: 0, x1: 1, y0: 0, y1: 1 };
+let V = FULLV; // current view (t-space window) used while drawing one plot
+const isFull = () => V.x0 === 0 && V.x1 === 1 && V.y0 === 0 && V.y1 === 1;
+const vx = t => (t - V.x0) / (V.x1 - V.x0), vy = t => (t - V.y0) / (V.y1 - V.y0);
 function jet(v) { // FlowJo-like: blue->cyan->green->yellow->red
   v = Math.max(0, Math.min(1, v));
   const stops = [[0, 0, 0, 200], [0.25, 0, 170, 255], [0.5, 40, 200, 40], [0.75, 255, 220, 0], [1, 230, 20, 20]];
@@ -672,16 +677,16 @@ function setupCanvas(cv, w, h) {
   const dpr = window.devicePixelRatio || 1; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
   cv.style.width = w + 'px'; cv.style.height = h + 'px'; const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return ctx;
 }
-function ticksFor(name) {
+function ticksFor(name, t0 = 0, t1 = 1) {
   const T = S.T[name], cfg = S.transforms[name]; if (!T) return [];
   const out = [];
   if (cfg.type === 'lin') {
-    const a = cfg.min, b = cfg.max, span = b - a; const st0 = Math.pow(10, Math.floor(Math.log10(span / 5))); let st = st0;
+    const a = T.inv(t0), b = T.inv(t1), span = b - a; const st0 = Math.pow(10, Math.floor(Math.log10(span / 5))); let st = st0;
     for (const m of [1, 2, 5, 10]) { if (span / (st0 * m) <= 6) { st = st0 * m; break; } }
     for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push({ t: T.fwd(v), label: fmtNum(v), major: true });
     return out;
   }
-  const lo = T.inv(0), hi = T.inv(1);
+  const lo = T.inv(0), hi = T.inv(1); const zf = 1 / Math.max(1e-6, t1 - t0);
   if (lo < 0 || cfg.type !== 'log') out.push({ t: T.fwd(0), label: '0', major: true });
   for (let k = 0; k <= 9; k++) {
     const d = Math.pow(10, k);
@@ -690,8 +695,8 @@ function ticksFor(name) {
       if (v > hi) break;
       const t = T.fwd(v); if (t <= 0.001) continue;
       // hide crowded low decades for biex / asinh (inside linear zone)
-      const t10 = T.fwd(d * 10) - T.fwd(d);
-      if (m === 1) out.push({ t, label: (cfg.type === 'log' || k >= 2) ? '10' + sup(k) : '', major: true }); else if (t10 > 0.06) out.push({ t, major: false });
+      const t10 = (T.fwd(d * 10) - T.fwd(d)) * zf;
+      if (m === 1) out.push({ t, label: (cfg.type === 'log' || k >= 2 || t10 > 0.3) ? '10' + sup(k) : '', major: true }); else if (t10 > 0.06) out.push({ t, major: t10 > 1.2, label: t10 > 1.2 && (m === 2 || m === 5) ? fmtNum(v) : '' });
       if (-v >= lo && cfg.type !== 'log') { const tn = T.fwd(-v); if (tn > 0.003) { if (m === 1) out.push({ t: tn, label: (k >= 2 && T.fwd(0) - tn > 0.04) ? '-10' + sup(k) : '', major: true }); else if (t10 > 0.06) out.push({ t: tn, major: false }); } }
     }
   }
@@ -701,18 +706,20 @@ function drawAxes(ctx, W, H, xname, yname, ylabel) {
   ctx.save(); ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.strokeRect(M.l + .5, M.t + .5, W, H);
   ctx.fillStyle = '#333'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   const placed = (tks, len, gap) => { const pri = t => t.label === '0' ? 0 : t.label && t.label[0] !== '-' ? 1 : 2; const lab = tks.filter(t => t.label).sort((a, b) => pri(a) - pri(b)); const keep = []; for (const t of lab) { const p = t.t * len; if (keep.every(k => Math.abs(k * len - p) >= gap)) keep.push(t.t); else t.label = ''; } return tks; };
-  for (const tk of placed(ticksFor(xname), W, 24)) { const x = M.l + tk.t * W; if (x < M.l - 1 || x > M.l + W + 1) continue; ctx.beginPath(); ctx.moveTo(x + .5, M.t + H); ctx.lineTo(x + .5, M.t + H + (tk.major ? 5 : 3)); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, x, M.t + H + 6); }
+  for (const tk of placed(ticksFor(xname, V.x0, V.x1), W / (V.x1 - V.x0), 24)) { const x = M.l + vx(tk.t) * W; if (x < M.l - 1 || x > M.l + W + 1) continue; ctx.beginPath(); ctx.moveTo(x + .5, M.t + H); ctx.lineTo(x + .5, M.t + H + (tk.major ? 5 : 3)); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, x, M.t + H + 6); }
   ctx.font = '11px system-ui, sans-serif'; ctx.fillText(chanLabel(xname), M.l + W / 2, M.t + H + 22);
   ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  if (yname) for (const tk of placed(ticksFor(yname), H, 13)) { const y = M.t + (1 - tk.t) * H; if (y < M.t - 1 || y > M.t + H + 1) continue; ctx.beginPath(); ctx.moveTo(M.l, y + .5); ctx.lineTo(M.l - (tk.major ? 5 : 3), y + .5); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, M.l - 6, y); }
+  if (yname) for (const tk of placed(ticksFor(yname, V.y0, V.y1), H / (V.y1 - V.y0), 13)) { const y = M.t + (1 - vy(tk.t)) * H; if (y < M.t - 1 || y > M.t + H + 1) continue; ctx.beginPath(); ctx.moveTo(M.l, y + .5); ctx.lineTo(M.l - (tk.major ? 5 : 3), y + .5); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, M.l - 6, y); }
   ctx.save(); ctx.translate(12, M.t + H / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(ylabel || chanLabel(yname), 0, 0); ctx.restore();
   ctx.restore();
 }
 // density grid of events (indices) at resolution W x H in t space
 function grid2d(X, Y, idx, W, H) {
-  const g = new Float32Array(W * H);
+  const g = new Float32Array(W * H); const full = isFull();
   for (let k = 0; k < idx.length; k++) { const i = idx[k]; const x = X[i], y = Y[i]; if (x !== x || y !== y) continue;
-    const px = Math.min(W - 1, Math.max(0, Math.floor(x * W))), py = Math.min(H - 1, Math.max(0, Math.floor((1 - y) * H))); g[py * W + px]++; }
+    let fx = vx(x) * W, fy = (1 - vy(y)) * H;
+    if (full) { fx = Math.min(W - 1, Math.max(0, fx)); fy = Math.min(H - 1, Math.max(0, fy)); } else if (fx < 0 || fy < 0 || fx >= W || fy >= H) continue;
+    g[Math.floor(fy) * W + Math.floor(fx)]++; }
   return g;
 }
 function render2D(ctx, W, H, X, Y, idx, kind, opts = {}) {
@@ -764,7 +771,7 @@ function marching(ctx, g, W, H, lv) {
 }
 function hist1d(X, idx, bins, smooth) {
   const h = new Float32Array(bins);
-  for (let k = 0; k < idx.length; k++) { const x = X[idx[k]]; if (x !== x) continue; h[Math.min(bins - 1, Math.max(0, Math.floor(x * bins)))]++; }
+  const full = isFull(); for (let k = 0; k < idx.length; k++) { const x = X[idx[k]]; if (x !== x) continue; let b = Math.floor(vx(x) * bins); if (full) b = Math.min(bins - 1, Math.max(0, b)); else if (b < 0 || b >= bins) continue; h[b]++; }
   if (smooth) { const o = new Float32Array(bins); const w = [1, 4, 6, 4, 1]; for (let i = 0; i < bins; i++) { let a = 0, s = 0; for (let j = -2; j <= 2; j++) if (i + j >= 0 && i + j < bins) { a += h[i + j] * w[j + 2]; s += w[j + 2]; } o[i] = a / s; } return o; }
   return h;
 }
@@ -901,7 +908,7 @@ function panelDims() { return { W: PSIZE - M.l - M.r, H: PSIZE - M.t - M.b }; }
 // gate -> pixel shapes
 function gateShape(g, s, W, H) {
   const Tx = S.T[g.x], Ty = g.y ? S.T[g.y] : null; const geom = geomFor(g, s);
-  const X = t => M.l + t * W, Y = t => M.t + (1 - t) * H;
+  const X = t => M.l + vx(t) * W, Y = t => M.t + (1 - vy(t)) * H;
   if (g.type === 'poly') return { kind: 'poly', pts: geom.v.map(v => [X(Tx.fwd(v[0])), Y(Ty.fwd(v[1]))]) };
   if (g.type === 'rect') { const x0 = X(Tx.fwd(geom.x0)), x1 = X(Tx.fwd(geom.x1)), y0 = Y(Ty.fwd(geom.y0)), y1 = Y(Ty.fwd(geom.y1)); return { kind: 'poly', rect: true, pts: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] }; }
   if (g.type === 'ellipse') { const { cx, cy, rx, ry, ang } = geom; const pts = []; for (let k = 0; k < 72; k++) { const a = k / 72 * 2 * Math.PI; const u = rx * Math.cos(a), v = ry * Math.sin(a); pts.push([X(cx + u * Math.cos(ang) - v * Math.sin(ang)), Y(cy + u * Math.sin(ang) + v * Math.cos(ang))]); }
@@ -910,7 +917,10 @@ function gateShape(g, s, W, H) {
   if (g.type === 'quad') return { kind: 'quad', cx: X(Tx.fwd(geom.cx)), cy: Y(Ty.fwd(geom.cy)), q: geom.q };
 }
 function renderAllPlots() { if (activeTab !== 'gating') return; const s = curSample(); $('#cursample').textContent = s ? s.name : ''; S.plots.forEach(p => { try { renderPlot(p); } catch (e) { console.error(e); __showErr('plot: ' + (e && e.stack ? e.stack.split('\n').slice(0, 2).join(' ') : e)); } }); }
-function renderPlot(p) {
+const viewOf = p => p.view || FULLV;
+function px2t(p, q) { const { W, H } = panelDims(); const v = viewOf(p); return [v.x0 + (q[0] - M.l) / W * (v.x1 - v.x0), v.y0 + (1 - (q[1] - M.t) / H) * (v.y1 - v.y0)]; }
+function renderPlot(p) { V = viewOf(p); try { renderPlotInner(p); } finally { V = FULLV; } }
+function renderPlotInner(p) {
   const el = $('#pl-' + p.id); if (!el) return; const cv = el.querySelector('canvas'); const s = curSample(); if (!s) return;
   const ctx = setupCanvas(cv, PSIZE, PSIZE); const { W, H } = panelDims();
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, PSIZE, PSIZE);
@@ -958,9 +968,11 @@ function renderPlot(p) {
     if (r.kind === 'rect') ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
     else if (r.kind === 'ellipse') { ctx.beginPath(); ctx.ellipse((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, Math.abs(r.x1 - r.x0) / 2 || 1, Math.abs(r.y1 - r.y0) / 2 || 1, 0, 0, 2 * Math.PI); ctx.stroke(); }
     else if (r.kind === 'range') { ctx.strokeRect(r.x0, M.t + H * 0.15, r.x1 - r.x0, H * 0.85); }
+    else if (r.kind === 'zoom') { ctx.strokeStyle = '#1f5fbf'; if (p.kind === 'hist' || !p.y) ctx.strokeRect(r.x0, M.t, r.x1 - r.x0, H); else ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); }
     ctx.setLineDash([]); }
   ctx.restore();
   foot.textContent = `${(gateById(p.pop) || { name: 'All events' }).name}: ${idx.length.toLocaleString()} events · click an axis name to change it · right-click for plot options`;
+  if (p.view) foot.append(' · ', h('a', { href: '#', onclick: e => { e.preventDefault(); p.view = null; renderPlot(p); autosave(); } }, 'reset zoom'));
   if (p._dropHint) { ctx.save(); ctx.fillStyle = 'rgba(31,95,191,.18)'; if (p._dropHint === 'x') ctx.fillRect(M.l, M.t + H, W, M.b); else ctx.fillRect(0, M.t, M.l, H); ctx.restore(); }
 }
 
@@ -968,11 +980,12 @@ function renderPlot(p) {
 function attachPlotEvents(p, cv) {
   const { W, H } = panelDims();
   const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-  const toT = q => [(q[0] - M.l) / W, 1 - (q[1] - M.t) / H];
+  const toT = q => px2t(p, q);
   const clamp = v => Math.max(-0.02, Math.min(1.02, v));
-  let drag = null;
+  let drag = null, panning = null;
   const hist = () => p.kind === 'hist' || !p.y;
   const axisAt = q => (q[1] > M.t + H + 4 && q[0] > M.l - 10) ? 'x' : (q[0] < M.l - 4 && q[1] > M.t && q[1] < M.t + H + 4) ? 'y' : null;
+  cv.addEventListener('wheel', e => { if (!(e.ctrlKey || e.metaKey || e.altKey)) return; e.preventDefault(); const f = Math.exp(Math.max(-0.5, Math.min(0.5, e.deltaY * 0.01))); zoomBy(p, f, toT(pos(e))); }, { passive: false });
   cv.addEventListener('contextmenu', e => { e.preventDefault(); plotMenu(p, e.clientX, e.clientY); });
   cv.addEventListener('dragover', e => { if (!e.dataTransfer.types.includes('text/x-channel')) return; e.preventDefault(); const q = pos(e); const ax = (M.t + H - q[1]) < (q[0] - M.l) ? 'x' : 'y'; const hnt = axisAt(q) || ax; if (p._dropHint !== hnt) { p._dropHint = hnt; renderPlot(p); } });
   cv.addEventListener('dragleave', () => { p._dropHint = null; renderPlot(p); });
@@ -984,9 +997,10 @@ function attachPlotEvents(p, cv) {
     if (tool === 'select') {
       const hit = hitTest(p, s, q, W, H);
       if (hit) { S.selGate = hit.g.id; drag = Object.assign({ start: q, orig: JSON.parse(JSON.stringify(geomFor(hit.g, s))) }, hit); renderSidebar(); renderAllPlots(); }
-      else { if (S.selGate !== null) { S.selGate = null; renderSidebar(); renderAllPlots(); } }
+      else { if (S.selGate !== null) { S.selGate = null; renderSidebar(); renderAllPlots(); } if (p.view) { panning = { start: q, v: Object.assign({}, p.view) }; cv.style.cursor = 'grabbing'; } }
       return;
     }
+    if (tool === 'zoom') { p._rubber = { kind: 'zoom', x0: q[0], y0: q[1], x1: q[0], y1: q[1] }; return; }
     if (tool === 'poly') return; // handled on click
     if (tool === 'quad') return;
     if (tool === 'range' && !hist()) { toast('Use the range tool on a histogram'); return; }
@@ -998,13 +1012,22 @@ function attachPlotEvents(p, cv) {
     if (p._rubber) { p._rubber.x1 = q[0]; p._rubber.y1 = q[1]; renderPlot(p); return; }
     const d = drafts.get(p.id); if (d) { d.mouse = q; renderPlot(p); return; }
     if (drag) { applyDrag(p, s, drag, q, W, H); bump(); renderAllPlots(); return; }
+    if (panning) { const v = panning.v, dx = (q[0] - panning.start[0]) / W * (v.x1 - v.x0), dy = (q[1] - panning.start[1]) / H * (v.y1 - v.y0); p.view = { x0: v.x0 - dx, x1: v.x1 - dx, y0: hist() ? 0 : v.y0 + dy, y1: hist() ? 1 : v.y1 + dy }; renderPlot(p); return; }
     if (tool === 'select') { if (axisAt(q)) { cv.style.cursor = 'pointer'; return; } const hit = hitTest(p, s, q, W, H); cv.style.cursor = hit ? (hit.mode === 'move' ? 'move' : 'pointer') : 'default'; }
   });
   cv.addEventListener('pointerup', async e => {
     const q = pos(e); const s = curSample();
+    if (panning) { panning = null; cv.style.cursor = 'default'; autosave(); return; }
     if (drag) { drag = null; bump(); refreshAll(); return; }
     if (p._rubber) {
       const r = p._rubber; p._rubber = null;
+      if (r.kind === 'zoom') {
+        if (Math.abs(r.x1 - r.x0) < 6 && Math.abs(r.y1 - r.y0) < 6) { zoomBy(p, 0.5, toT([r.x0, r.y0])); return; }
+        const a = toT([r.x0, r.y0]), b = toT([r.x1, r.y1]);
+        p.view = { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), y0: hist() ? 0 : Math.min(a[1], b[1]), y1: hist() ? 1 : Math.max(a[1], b[1]) };
+        if (p.view.x1 - p.view.x0 < 0.005) p.view.x1 = p.view.x0 + 0.005; if (p.view.y1 - p.view.y0 < 0.005) p.view.y1 = p.view.y0 + 0.005;
+        renderPlot(p); autosave(); return;
+      }
       if (Math.abs(r.x1 - r.x0) < 4 && (r.kind === 'range' || Math.abs(r.y1 - r.y0) < 4)) { renderPlot(p); return; }
       const a = toT([r.x0, r.y0]).map(clamp), b = toT([r.x1, r.y1]).map(clamp); const Tx = S.T[p.x], Ty = p.y ? S.T[p.y] : null;
       let g;
@@ -1031,6 +1054,7 @@ function attachPlotEvents(p, cv) {
     d.pts.push(q); renderPlot(p);
   });
   cv.addEventListener('dblclick', async e => {
+    if (tool === 'zoom') { p.view = null; renderPlot(p); autosave(); return; }
     if (tool === 'poly') { const d = drafts.get(p.id); if (d) { d.pts.pop(); if (d.pts.length >= 3) await finishPoly(p); } return; }
     if (tool === 'select') { const s = curSample(); const hit = hitTest(p, s, pos(e), W, H); if (hit) addPlot({ pop: hit.g.id, x: p.x, y: p.y, kind: p.kind }); }
   });
@@ -1048,7 +1072,8 @@ async function createGate(p, def) {
   if (S.perSample) { g.overrides[curSample().name] = g.geom; }
   S.gates.push(g); S.selGate = g.id; bump(); setTool('select'); refreshAll();
 }
-function hitTest(p, s, q, W, H) {
+function hitTest(p, s, q, W, H) { V = viewOf(p); try { return hitTestInner(p, s, q, W, H); } finally { V = FULLV; } }
+function hitTestInner(p, s, q, W, H) {
   const gs = plotGates(p);
   const sel = gs.find(g => g.id === S.selGate);
   if (sel) { // handles first
@@ -1073,24 +1098,24 @@ function writeGeom(g, s, geom) {
   }
 }
 function applyDrag(p, s, d, q, W, H) {
-  const g = d.g, o = d.orig; const dt = [(q[0] - d.start[0]) / W, -(q[1] - d.start[1]) / H];
+  const g = d.g, o = d.orig; const vw = viewOf(p); const dt = [(q[0] - d.start[0]) / W * (vw.x1 - vw.x0), -(q[1] - d.start[1]) / H * (vw.y1 - vw.y0)];
   if (d.mode === 'select') return;
   const Tx = S.T[g.x], Ty = g.y ? S.T[g.y] : null; const mv = (T, v, dd) => T.inv(Math.max(0, Math.min(1, T.fwd(v) + dd)));
   let n = JSON.parse(JSON.stringify(o));
   if (g.type === 'poly') {
     if (d.mode === 'move') n.v = o.v.map(v => [mv(Tx, v[0], dt[0]), mv(Ty, v[1], dt[1])]);
-    else { const t = [(q[0] - M.l) / W, 1 - (q[1] - M.t) / H]; n.v[d.i] = [Tx.inv(t[0]), Ty.inv(t[1])]; }
+    else { const t = px2t(p, q); n.v[d.i] = [Tx.inv(t[0]), Ty.inv(t[1])]; }
   } else if (g.type === 'rect') {
     if (d.mode === 'move') { n.x0 = mv(Tx, o.x0, dt[0]); n.x1 = mv(Tx, o.x1, dt[0]); n.y0 = mv(Ty, o.y0, dt[1]); n.y1 = mv(Ty, o.y1, dt[1]); }
-    else { const t = [(q[0] - M.l) / W, 1 - (q[1] - M.t) / H]; const xi = [0, 1, 1, 0][d.i], yi = [0, 0, 1, 1][d.i]; // corners from gateShape order
+    else { const t = px2t(p, q); const xi = [0, 1, 1, 0][d.i], yi = [0, 0, 1, 1][d.i]; // corners from gateShape order
       const X = Tx.inv(t[0]), Y = Ty.inv(t[1]); if (xi === 0) n.x0 = X; else n.x1 = X; if (yi === 0) n.y0 = Y; else n.y1 = Y; }
   } else if (g.type === 'ellipse') {
     if (d.mode === 'move') { n.cx = o.cx + dt[0]; n.cy = o.cy + dt[1]; }
-    else { const t = [(q[0] - M.l) / W, 1 - (q[1] - M.t) / H]; const vx = t[0] - o.cx, vy = t[1] - o.cy; const len = Math.hypot(vx, vy);
+    else { const t = px2t(p, q); const vx = t[0] - o.cx, vy = t[1] - o.cy; const len = Math.hypot(vx, vy);
       if (d.i === 0) { n.rx = Math.max(0.005, len); n.ang = Math.atan2(vy, vx); } else { n.ry = Math.max(0.005, len); n.ang = Math.atan2(vy, vx) - Math.PI / 2; } }
   } else if (g.type === 'range') {
     if (d.mode === 'move') { n.lo = mv(Tx, o.lo, dt[0]); n.hi = mv(Tx, o.hi, dt[0]); }
-    else { const t = (q[0] - M.l) / W; n[d.mode] = Tx.inv(t); if (Tx.fwd(n.lo) > Tx.fwd(n.hi)) [n.lo, n.hi] = [n.hi, n.lo]; }
+    else { const t = px2t(p, q)[0]; n[d.mode] = Tx.inv(t); if (Tx.fwd(n.lo) > Tx.fwd(n.hi)) [n.lo, n.hi] = [n.hi, n.lo]; }
   } else if (g.type === 'quad') { n.cx = mv(Tx, o.cx, dt[0]); n.cy = mv(Ty, o.cy, dt[1]); }
   writeGeom(g, s, n);
 }
@@ -1267,6 +1292,32 @@ async function renameMarker(name) {
   if (v === null) return; setMarker(name, v); afterRename();
 }
 function afterRename() { buildPlotPanels(); renderSidebar(); refreshActive(); autosave(); }
+function zoomBy(p, f, c) {
+  const v = Object.assign({}, viewOf(p)); const hist = p.kind === 'hist' || !p.y;
+  c = c || [(v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2];
+  v.x0 = c[0] - (c[0] - v.x0) * f; v.x1 = c[0] + (v.x1 - c[0]) * f;
+  if (!hist) { v.y0 = c[1] - (c[1] - v.y0) * f; v.y1 = c[1] + (v.y1 - c[1]) * f; }
+  if (f > 1 && v.x0 <= 0 && v.x1 >= 1 && (hist || (v.y0 <= 0 && v.y1 >= 1))) { p.view = null; } else p.view = v;
+  renderPlot(p); autosave();
+}
+function fmtRaw(v) { return Math.abs(v) >= 1e4 || (Math.abs(v) < 0.01 && v !== 0) ? v.toExponential(2) : String(Math.round(v * 100) / 100); }
+async function setRange(p, ax) {
+  const ch = ax === 'x' ? p.x : p.y; const T = S.T[ch]; const v = viewOf(p);
+  const cur = ax === 'x' ? [v.x0, v.x1] : [v.y0, v.y1];
+  const ans = await askText(`${chanLabel(ch)} range shown on this plot (min, max)`, `${fmtRaw(T.inv(cur[0]))}, ${fmtRaw(T.inv(cur[1]))}`);
+  if (!ans) return; const nums = ans.split(/[,;\s]+/).map(parseFloat).filter(x => !isNaN(x)); if (nums.length !== 2) { toast('Type two numbers, e.g. 0, 5e6'); return; }
+  let a = T.fwd(Math.min(...nums)), b = T.fwd(Math.max(...nums)); if (!(b > a)) { toast('That range is outside this axis scale; change the scale in Markers, scales & compensation'); return; }
+  const nv = Object.assign({}, v); if (ax === 'x') { nv.x0 = a; nv.x1 = b; } else { nv.y0 = a; nv.y1 = b; }
+  p.view = (nv.x0 === 0 && nv.x1 === 1 && nv.y0 === 0 && nv.y1 === 1) ? null : nv; renderPlot(p); autosave();
+}
+function changeScale(name, type) {
+  const c = chan(name); const cfg = S.transforms[name]; const top = cfg.max || c.range; let n;
+  if (type === 'lin') { const s = S.samples.find(s => s.pIndex[name] !== undefined); n = isScatter(name) && s ? defaultTransform(s.fcs.params[s.pIndex[name]], s) : { type: 'lin', min: 0, max: top }; if (n.type !== 'lin') n = { type: 'lin', min: 0, max: top }; }
+  else if (type === 'log') n = { type: 'log', min: 1, max: top };
+  else if (type === 'asinh') n = { type: 'asinh', min: -500, max: top, cof: 150 };
+  else n = { type: 'biex', max: top, pos: Math.round((Math.log10(top) - 1) * 100) / 100, neg: 0, width: -100, min: 0 };
+  setTransform(name, n); S.plots.forEach(q => { if (q.x === name || q.y === name) q.view = null; }); refreshAll();
+}
 // ---------- popup menus ----------
 function closeMenu() { const m = $('#popmenu'); if (m) m.remove(); }
 function popMenu(x, y, items) {
@@ -1300,6 +1351,11 @@ function plotMenu(p, x, y) {
   if (p.kind === 'pseudo' || p.kind === 'density') { items.push('-', { header: 'Colours' }); for (const k in CMAPS) items.push({ label: CMAPS[k].label, sw: grad(CMAPS[k].f), on: (p.cmap || 'jet') === k, do: set('cmap', k) }); }
   if (p.kind === 'dot') { items.push('-', { header: 'Dot colour' }); for (const k in DOTCOLS) items.push({ label: k[0].toUpperCase() + k.slice(1), sw: `background:rgb(${DOTCOLS[k].join(',')})`, on: (p.dot || 'black') === k, do: set('dot', k) }); }
   if (p.kind === 'hist' || !p.y) { items.push('-', { header: 'Fill colour' }); for (const c of ['#888888', '#1f5fbf', '#c81e1e', '#1e8c3c', '#7828a0', '#f58231']) items.push({ label: c, sw: `background:${c}`, on: (p.hcol || '#888888') === c, do: set('hcol', c) }); }
+  items.push('-', { header: 'Zoom' }, { label: 'Zoom in', sub: 'or ⌘/Ctrl + scroll, or the Zoom tool', do: () => zoomBy(p, 0.6) }, { label: 'Zoom out', do: () => zoomBy(p, 1 / 0.6) }, { label: 'Reset zoom', on: false, do: () => { p.view = null; renderPlot(p); autosave(); } },
+    { label: 'Set X range…', do: () => setRange(p, 'x') });
+  if (p.y && p.kind !== 'hist') items.push({ label: 'Set Y range…', do: () => setRange(p, 'y') });
+  const scaleItems = (ch, axn) => { const cur = S.transforms[ch].type; return [{ header: `${axn} scale · ${markerOf(ch) || ch}` }, ...[['lin', 'Linear'], ['log', 'Log'], ['biex', 'Biex (FlowJo)'], ['asinh', 'Arcsinh']].map(([v, l]) => ({ label: l, on: cur === v, do: () => changeScale(ch, v) }))]; };
+  items.push('-', ...scaleItems(p.x, 'X')); if (p.y && p.kind !== 'hist') items.push(...scaleItems(p.y, 'Y'));
   items.push('-', { header: 'Axes' }, { label: 'Change X axis…', do: () => chanMenu(p, 'x', x, y) }, { label: 'Change Y axis…', do: () => chanMenu(p, 'y', x, y) });
   if (p.y && p.kind !== 'hist') items.push({ label: 'Swap X ⇄ Y', do: () => { [p.x, p.y] = [p.y, p.x]; buildPlotPanels(); renderAllPlots(); autosave(); } });
   items.push('-', { label: 'Duplicate plot', do: () => addPlot(Object.assign({}, p, { id: uid('p') })) }, { label: 'Save as PNG', do: async () => saveFile(`${curSample().name}.png`, await canvasBlob($('#pl-' + p.id + ' canvas'))) });
@@ -1459,7 +1515,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); S.cur = (S.cur + (e.key === 'ArrowDown' ? 1 : -1) + S.samples.length) % S.samples.length; refreshAll(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && S.selGate) { e.preventDefault(); deleteGate(S.selGate); }
   else if (e.key === 'Escape') setTool('select');
-  else if (activeTab === 'gating' && !e.metaKey && !e.ctrlKey) { const m = { r: 'rect', o: 'ellipse', e: 'ellipse', p: 'poly', q: 'quad', h: 'range', v: 'select' }[e.key.toLowerCase()]; if (m) setTool(m); }
+  else if (activeTab === 'gating' && !e.metaKey && !e.ctrlKey) { const m = { r: 'rect', o: 'ellipse', e: 'ellipse', p: 'poly', q: 'quad', h: 'range', v: 'select', z: 'zoom' }[e.key.toLowerCase()]; if (m) setTool(m); }
 });
 window.addEventListener('beforeunload', () => { try { if (S.gates.length) localStorage.setItem('drorflow.ws.v1', JSON.stringify(workspaceJSON())); } catch (e) { } });
 

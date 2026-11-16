@@ -128,6 +128,24 @@ button.danger{color:#b42318;border-color:#f1c4c0}button.pri.danger{background:#b
 .bar{height:8px;background:#e5e9f0;border-radius:4px;overflow:hidden;width:320px}.bar div{height:100%;background:var(--ac);width:0;transition:width .2s}
 .err{color:#b42318}
 .modal input[type=checkbox],.modal input[type=radio]{width:auto;margin:0 4px 0 0;padding:0}
+#v-layout{padding-right:0}
+.toolbar.lay{gap:6px;flex-wrap:wrap}.toolbar.lay.sub{top:38px;font-size:12px}.toolbar.lay .sep{width:1px;height:20px;background:var(--bd);margin:0 4px}
+.toolbar.lay label{display:flex;align-items:center;gap:4px}.num.s{width:52px}
+.laywrap{display:flex;gap:14px;align-items:flex-start}
+#laypages{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:22px;padding:6px 0 40px;overflow:auto}
+.lpage{position:relative;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.12);flex:none}
+.lpnum{position:absolute;top:-18px;left:0;font-size:11px;color:var(--mut);display:flex;gap:6px;align-items:center}
+.litem{position:absolute;outline:1px dashed transparent;cursor:move;touch-action:none}
+.litem:hover{outline-color:#b9c7dd}.litem.sel{outline:2px solid var(--ac)}
+.litem canvas{display:block;pointer-events:none}
+.lhandle{position:absolute;right:-5px;bottom:-5px;width:11px;height:11px;background:var(--ac);border:2px solid #fff;border-radius:2px;cursor:nwse-resize;display:none}
+.litem.sel .lhandle,.litem:hover .lhandle{display:block}
+.addpage{align-self:center;border-style:dashed;color:var(--mut)}
+#layprops{width:270px;flex:none;position:sticky;top:84px;max-height:calc(100vh - 140px);overflow:auto;margin-right:12px}
+#layprops .pr{display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px}#layprops .pr>span{width:74px;color:var(--mut);flex:none}
+#layprops .pr select,#layprops .pr input[type=text]{flex:1;min-width:0}#layprops .pr.sm>span{width:auto}#layprops .pr.sm .num{width:58px}
+#layprops textarea{width:100%;border:1px solid var(--bd);border-radius:6px;padding:6px;font:inherit}
+#layprops button{margin:2px 0}.csw{width:22px;height:18px;padding:0;border:none;background:none}
 kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;font-size:11px}
 </style>
 </head>
@@ -141,6 +159,7 @@ kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;
     <button class="tab" data-tab="stats">Statistics</button>
     <button class="tab" data-tab="overlay">Overlays</button>
     <button class="tab" data-tab="dr">tSNE / UMAP</button>
+    <button class="tab" data-tab="layout">Layout</button>
     <button class="tab cloud" data-tab="lab" hidden>☁ Lab</button>
     <button class="tab" data-tab="scales">Markers &amp; scales</button>
   </span>
@@ -211,6 +230,34 @@ kbd{background:#eef0f3;border:1px solid #d6dae0;border-radius:3px;padding:0 4px;
       <div class="toolbar"><b>tSNE / UMAP</b><span class="muted">&nbsp;Runs on the scaled (biex) values of the chosen parameters. Results become new parameters you can gate on.</span></div>
       <div class="drwrap"><div class="cfgrow" id="drcfg" style="flex-direction:column;width:300px"></div>
         <div><div id="drprog" class="muted"></div><div id="drlegend"></div><canvas id="drcanvas"></canvas></div></div>
+    </section>
+    <section class="view" id="v-layout" hidden>
+      <div class="toolbar lay">
+        <b>Layout</b>
+        <button onclick="addLayoutItem({sample:(curSample()||{}).name,pop:S.selGate,x:defaultAxes().x,y:defaultAxes().y});renderLayout();autosave()">＋ Plot</button>
+        <button onclick="addLayoutItem({kind:'overlay',pop:S.selGate,x:(fluorChannels().find(n=>/-A$/.test(n))||S.channels[0].name),y:null,samples:S.samples.filter(s=>s.include).map(s=>s.name),w:300,h:250});renderLayout();autosave()">＋ Overlay</button>
+        <button onclick="addLayoutItem({type:'text',text:'Title',size:16,bold:true,w:520,h:28});renderLayout();autosave()">＋ Text</button>
+        <button onclick="arrangeGrid()" title="Line up all plots in a tidy grid (uses the first plot's size), adding pages as needed">Arrange in grid</button>
+        <span class="sep"></span>
+        <select id="lay-page" onchange="layoutStyleChanged()"><option>A4</option><option>Letter</option></select>
+        <select id="lay-orient" onchange="layoutStyleChanged()"><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select>
+        <select id="lay-zoom" onchange="layoutStyleChanged()" title="Screen zoom"><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="1">100%</option><option value="1.25">125%</option></select>
+        <label class="ck"><input type="checkbox" id="lay-grid" onchange="layoutStyleChanged()">Snap</label>
+        <span class="sp"></span>
+        <button onclick="exportLayoutPNG()">⤓ PNG</button>
+        <button class="pri" onclick="exportLayoutPDF()">⤓ Export PDF</button>
+      </div>
+      <div class="toolbar lay sub">
+        <span class="muted">Text:</span>
+        <select id="lay-font" onchange="layoutStyleChanged()"><option>Arial</option><option>Helvetica</option><option>Times</option><option>System</option></select>
+        <label>Axis numbers <input type="number" id="lay-tick" class="num s" min="5" max="30" onchange="layoutStyleChanged()"></label>
+        <label>Axis names <input type="number" id="lay-label" class="num s" min="5" max="36" onchange="layoutStyleChanged()"></label>
+        <label>Titles <input type="number" id="lay-title" class="num s" min="5" max="40" onchange="layoutStyleChanged()"></label>
+        <label>Gate labels <input type="number" id="lay-gate" class="num s" min="5" max="30" onchange="layoutStyleChanged()"></label>
+        <label>Gate line <input type="number" id="lay-lw" class="num s" min="0.5" max="5" step="0.25" onchange="layoutStyleChanged()"></label>
+        <label class="ck"><input type="checkbox" id="lay-gatebg" onchange="layoutStyleChanged()">White behind gate labels</label>
+      </div>
+      <div class="laywrap"><div id="laypages"></div><div id="layprops" class="cbox"></div></div>
     </section>
     <section class="view" id="v-lab" hidden>
       <div class="toolbar"><b>Lab experiments</b><span class="muted">&nbsp;saved by lab members. Open one to load its FCS files and gates.</span><span class="sp"></span>
@@ -684,6 +731,8 @@ let _ci = 0; const nextColor = () => PALETTE[(_ci++) % PALETTE.length];
 // ===================== plotting =====================
 'use strict';
 const M = { l: 54, r: 10, t: 10, b: 40 };
+const STYLE_DEFAULT = { tick: 10, label: 11, gate: 11, title: 12, font: 'system-ui, -apple-system, Segoe UI, sans-serif', lw: 1.2, axisLw: 1, gateBg: true, ticksBold: false };
+let STYLE = Object.assign({}, STYLE_DEFAULT);
 const FULLV = { x0: 0, x1: 1, y0: 0, y1: 1 };
 let V = FULLV; // current view (t-space window) used while drawing one plot
 const isFull = () => V.x0 === 0 && V.x1 === 1 && V.y0 === 0 && V.y1 === 1;
@@ -748,14 +797,15 @@ function ticksFor(name, t0 = 0, t1 = 1) {
   return out;
 }
 function drawAxes(ctx, W, H, xname, yname, ylabel) {
-  ctx.save(); ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.strokeRect(M.l + .5, M.t + .5, W, H);
-  ctx.fillStyle = '#333'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.save(); ctx.strokeStyle = '#222'; ctx.lineWidth = STYLE.axisLw; ctx.strokeRect(M.l + .5, M.t + .5, W, H);
+  const tf = `${STYLE.ticksBold ? 'bold ' : ''}${STYLE.tick}px ${STYLE.font}`, lf = `${STYLE.label}px ${STYLE.font}`;
+  ctx.fillStyle = '#222'; ctx.font = tf; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   const placed = (tks, len, gap) => { const pri = t => t.label === '0' ? 0 : t.label && t.label[0] !== '-' ? 1 : 2; const lab = tks.filter(t => t.label).sort((a, b) => pri(a) - pri(b)); const keep = []; for (const t of lab) { const p = t.t * len; if (keep.every(k => Math.abs(k * len - p) >= gap)) keep.push(t.t); else t.label = ''; } return tks; };
-  for (const tk of placed(ticksFor(xname, V.x0, V.x1), W / (V.x1 - V.x0), 24)) { const x = M.l + vx(tk.t) * W; if (x < M.l - 1 || x > M.l + W + 1) continue; ctx.beginPath(); ctx.moveTo(x + .5, M.t + H); ctx.lineTo(x + .5, M.t + H + (tk.major ? 5 : 3)); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, x, M.t + H + 6); }
-  ctx.font = '11px system-ui, sans-serif'; ctx.fillText(chanLabel(xname), M.l + W / 2, M.t + H + 22);
-  ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  if (yname) for (const tk of placed(ticksFor(yname, V.y0, V.y1), H / (V.y1 - V.y0), 13)) { const y = M.t + (1 - vy(tk.t)) * H; if (y < M.t - 1 || y > M.t + H + 1) continue; ctx.beginPath(); ctx.moveTo(M.l, y + .5); ctx.lineTo(M.l - (tk.major ? 5 : 3), y + .5); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, M.l - 6, y); }
-  ctx.save(); ctx.translate(12, M.t + H / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(ylabel || chanLabel(yname), 0, 0); ctx.restore();
+  for (const tk of placed(ticksFor(xname, V.x0, V.x1), W / (V.x1 - V.x0), Math.max(18, STYLE.tick * 2.4))) { const x = M.l + vx(tk.t) * W; if (x < M.l - 1 || x > M.l + W + 1) continue; ctx.beginPath(); ctx.moveTo(x + .5, M.t + H); ctx.lineTo(x + .5, M.t + H + (tk.major ? 5 : 3)); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, x, M.t + H + 6); }
+  ctx.font = lf; ctx.fillText(chanLabel(xname), M.l + W / 2, M.t + H + STYLE.tick + 11);
+  ctx.font = tf; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  if (yname) for (const tk of placed(ticksFor(yname, V.y0, V.y1), H / (V.y1 - V.y0), STYLE.tick * 1.3)) { const y = M.t + (1 - vy(tk.t)) * H; if (y < M.t - 1 || y > M.t + H + 1) continue; ctx.beginPath(); ctx.moveTo(M.l, y + .5); ctx.lineTo(M.l - (tk.major ? 5 : 3), y + .5); ctx.stroke(); if (tk.label) ctx.fillText(tk.label, M.l - 6, y); }
+  ctx.save(); ctx.translate(Math.max(12, M.l - STYLE.tick * 3.6 - 10 - STYLE.label / 2), M.t + H / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.font = lf; ctx.fillText(ylabel || chanLabel(yname), 0, 0); ctx.restore();
   ctx.restore();
 }
 // density grid of events (indices) at resolution W x H in t space
@@ -767,7 +817,8 @@ function grid2d(X, Y, idx, W, H) {
     g[Math.floor(fy) * W + Math.floor(fx)]++; }
   return g;
 }
-function render2D(ctx, W, H, X, Y, idx, kind, opts = {}) {
+function render2D(ctx, W0, H0, X, Y, idx, kind, opts = {}) {
+  const res = opts.res || 1; const W = Math.round(W0 * res), H = Math.round(H0 * res);
   const off = document.createElement('canvas'); off.width = W; off.height = H; const octx = off.getContext('2d'); const img = octx.createImageData(W, H); const d = img.data;
   const g = grid2d(X, Y, idx, W, H);
   if (kind === 'dot') {
@@ -775,7 +826,7 @@ function render2D(ctx, W, H, X, Y, idx, kind, opts = {}) {
     for (let p = 0; p < W * H; p++) if (g[p] > 0) { d[p * 4] = c[0]; d[p * 4 + 1] = c[1]; d[p * 4 + 2] = c[2]; d[p * 4 + 3] = 255; }
   } else {
     const cm = (CMAPS[opts.cmap] || CMAPS.jet).f;
-    const sm = blur(Float32Array.from(g), W, H, 2, kind === 'density' ? 3 : 2);
+    const sm = blur(Float32Array.from(g), W, H, 2, Math.round((kind === 'density' ? 3 : 2) * res));
     let mx = 0; for (let p = 0; p < sm.length; p++) if (sm[p] > mx) mx = sm[p];
     const lmx = Math.log1p(mx * 50);
     if (kind === 'pseudo') {
@@ -786,13 +837,13 @@ function render2D(ctx, W, H, X, Y, idx, kind, opts = {}) {
       // outliers as dots below lowest level
       const levels = probLevels(sm, [0.98, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]);
       for (let p = 0; p < W * H; p++) if (g[p] > 0 && sm[p] < levels[0]) { d[p * 4] = 90; d[p * 4 + 1] = 90; d[p * 4 + 2] = 90; d[p * 4 + 3] = 255; }
-      octx.putImageData(img, 0, 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(off, M.l, M.t);
-      ctx.save(); ctx.translate(M.l, M.t); ctx.lineWidth = 1; ctx.strokeStyle = '#111';
+      octx.putImageData(img, 0, 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(off, M.l, M.t, W0, H0);
+      ctx.save(); ctx.translate(M.l, M.t); ctx.scale(1 / res, 1 / res); ctx.lineWidth = res; ctx.strokeStyle = '#111';
       for (const lv of levels) marching(ctx, sm, W, H, lv);
       ctx.restore(); return;
     }
   }
-  octx.putImageData(img, 0, 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(off, M.l, M.t);
+  octx.putImageData(img, 0, 0); ctx.imageSmoothingEnabled = false; ctx.drawImage(off, M.l, M.t, W0, H0);
 }
 function probLevels(sm, fracs) {
   const v = Array.from(sm).filter(x => x > 0).sort((a, b) => b - a); let tot = 0; for (const x of v) tot += x;
@@ -861,7 +912,7 @@ function showTab(t) { activeTab = t; if (t === 'lab') { $('#welcome').hidden = t
 function refreshActive() {
   if (activeTab === 'lab') { renderLab(); return; }
   if (!S.samples.length) return;
-  if (activeTab === 'gating') renderAllPlots(); else if (activeTab === 'stats') renderStats(); else if (activeTab === 'overlay') renderOverlayUI(); else if (activeTab === 'dr') renderDRUI(); else if (activeTab === 'scales') renderScales(); else if (activeTab === 'lab') renderLab();
+  if (activeTab === 'gating') renderAllPlots(); else if (activeTab === 'stats') renderStats(); else if (activeTab === 'overlay') renderOverlayUI(); else if (activeTab === 'dr') renderDRUI(); else if (activeTab === 'scales') renderScales(); else if (activeTab === 'lab') renderLab(); else if (activeTab === 'layout') renderLayout();
 }
 function refreshAll() { renderSidebar(); refreshActive(); autosave(); }
 
@@ -936,6 +987,7 @@ function buildPlotPanels() {
         h('select', { title: 'Plot type', onchange: e => { p.kind = e.target.value; renderPlot(p); autosave(); } }, [['pseudo', 'Pseudocolor'], ['dot', 'Dot plot'], ['density', 'Density'], ['contour', 'Contour'], ['hist', 'Histogram']].map(([v, l]) => h('option', { value: v, selected: p.kind === v }, l))),
         h('span', { class: 'sp' }),
         h('button', { class: 'mini', title: 'Swap axes', onclick: () => { if (p.y) { [p.x, p.y] = [p.y, p.x]; buildPlotPanels(); renderAllPlots(); } } }, '⇄'),
+        h('button', { class: 'mini', title: 'Add this plot to the layout (right-click the plot for one per sample)', onclick: () => plotToLayout(p, false) }, '⤴'),
         h('button', { class: 'mini', title: 'Save as PNG', onclick: async () => { saveFile(`${curSample().name}_${(gateById(p.pop) || { name: 'All' }).name}.png`, await canvasBlob(cv)); } }, '⤓'),
         h('button', { class: 'mini', title: 'Close plot', onclick: () => { S.plots = S.plots.filter(q => q !== p); buildPlotPanels(); renderAllPlots(); autosave(); } }, '×')),
       h('div', { class: 'ph' },
@@ -1004,28 +1056,7 @@ function renderPlotInner(p) {
     drawAxes(ctx, W, H, p.x, p.y);
   }
   // gates
-  const parentN = idx.length;
-  ctx.save(); ctx.beginPath(); ctx.rect(M.l - 2, M.t - 2, W + 4, H + 4); ctx.clip();
-  const quadDone = new Set();
-  for (const g of plotGates(p)) {
-    const sh = gateShape(g, s, W, H); const sel = S.selGate === g.id || (g.quadId && gateById(S.selGate) && gateById(S.selGate).quadId === g.quadId);
-    const pct = parentN ? (100 * popCount(s, g.id) / parentN) : 0;
-    ctx.strokeStyle = sel ? '#e00' : '#000'; ctx.lineWidth = sel ? 2 : 1.2; ctx.fillStyle = '#000'; ctx.font = 'bold 11px system-ui, sans-serif';
-    const label = (txt, x, y, al = 'center') => { ctx.save(); ctx.textAlign = al; ctx.textBaseline = 'middle'; const w = ctx.measureText(txt).width; const lx = al === 'center' ? x - w / 2 : al === 'right' ? x - w : x; ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(lx - 2, y - 7, w + 4, 14); ctx.fillStyle = '#000'; ctx.fillText(txt, x, y); ctx.restore(); };
-    if (sh.kind === 'poly') {
-      ctx.beginPath(); sh.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.stroke();
-      if (sel) { ctx.fillStyle = '#e00'; const hp = sh.handles || (sh.rect ? sh.pts : sh.pts); for (const q of hp) ctx.fillRect(q[0] - 3, q[1] - 3, 6, 6); }
-      const top = sh.pts.reduce((a, b) => b[1] < a[1] ? b : a); const cx = sh.pts.reduce((a, b) => a + b[0], 0) / sh.pts.length;
-      label(`${g.name}  ${pct.toFixed(pct < 1 ? 2 : 1)}`, Math.min(M.l + W - 40, Math.max(M.l + 40, cx)), Math.max(M.t + 8, top[1] - 9));
-    } else if (sh.kind === 'range') {
-      const yb = M.t + H * 0.15; ctx.beginPath(); ctx.moveTo(sh.x0, M.t + H); ctx.lineTo(sh.x0, yb); ctx.lineTo(sh.x1, yb); ctx.lineTo(sh.x1, M.t + H); ctx.stroke();
-      label(`${g.name}  ${pct.toFixed(1)}`, (sh.x0 + sh.x1) / 2, yb - 9);
-    } else if (sh.kind === 'quad') {
-      if (!quadDone.has(g.quadId)) { quadDone.add(g.quadId); ctx.beginPath(); ctx.moveTo(sh.cx, M.t); ctx.lineTo(sh.cx, M.t + H); ctx.moveTo(M.l, sh.cy); ctx.lineTo(M.l + W, sh.cy); ctx.stroke(); }
-      const pos = [[M.l + 4, M.t + 10, 'left'], [M.l + W - 4, M.t + 10, 'right'], [M.l + W - 4, M.t + H - 10, 'right'], [M.l + 4, M.t + H - 10, 'left']][sh.q];
-      label(`${g.name.replace(/^Q\d: /, '')} ${pct.toFixed(1)}`, pos[0], pos[1], pos[2]);
-    }
-  }
+  ctx.save(); drawGates(ctx, p, s, W, H, idx.length, true);
   // polygon draft
   const d = drafts.get(p.id);
   if (d) { ctx.strokeStyle = '#e00'; ctx.lineWidth = 1.5; ctx.beginPath(); d.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); if (d.mouse) ctx.lineTo(d.mouse[0], d.mouse[1]); ctx.stroke(); ctx.fillStyle = '#e00'; d.pts.forEach(q => ctx.fillRect(q[0] - 2.5, q[1] - 2.5, 5, 5)); }
@@ -1045,6 +1076,33 @@ function renderPlotInner(p) {
   if (p._dropHint) { ctx.save(); ctx.fillStyle = 'rgba(31,95,191,.18)'; if (p._dropHint === 'x') ctx.fillRect(M.l, M.t + H, W, M.b); else ctx.fillRect(0, M.t, M.l, H); ctx.restore(); }
 }
 
+function drawGates(ctx, p, s, W, H, parentN, interactive) {
+  ctx.save(); ctx.beginPath(); ctx.rect(M.l - 2, M.t - 2, W + 4, H + 4); ctx.clip();
+  const quadDone = new Set();
+  const label = (txt, x, y, al = 'center') => { ctx.save(); ctx.font = `bold ${STYLE.gate}px ${STYLE.font}`; ctx.textAlign = al; ctx.textBaseline = 'middle'; const w = ctx.measureText(txt).width; const hgt = STYLE.gate + 3; const lx = al === 'center' ? x - w / 2 : al === 'right' ? x - w : x; if (STYLE.gateBg) { ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(lx - 2, y - hgt / 2, w + 4, hgt); } ctx.fillStyle = '#000'; ctx.fillText(txt, x, y); ctx.restore(); };
+  const fmtP = v => v.toFixed(v < 1 ? 2 : 1);
+  for (const g of plotGates(p)) {
+    if (p.hideGates && p.hideGates.includes(g.id)) continue;
+    const sh = gateShape(g, s, W, H); const sel = interactive && (S.selGate === g.id || (g.quadId && gateById(S.selGate) && gateById(S.selGate).quadId === g.quadId));
+    const pct = parentN ? (100 * popCount(s, g.id) / parentN) : 0; const txt = p.showPct === false ? g.name : `${g.name}  ${fmtP(pct)}`;
+    ctx.strokeStyle = sel ? '#e00' : '#000'; ctx.lineWidth = sel ? 2 : STYLE.lw;
+    const lo = Math.max(20, STYLE.gate * 3);
+    if (sh.kind === 'poly') {
+      ctx.beginPath(); sh.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.stroke();
+      if (sel) { ctx.fillStyle = '#e00'; for (const q of (sh.handles || sh.pts)) ctx.fillRect(q[0] - 3, q[1] - 3, 6, 6); }
+      const top = sh.pts.reduce((a, b) => b[1] < a[1] ? b : a); const cx = sh.pts.reduce((a, b) => a + b[0], 0) / sh.pts.length;
+      label(txt, Math.min(M.l + W - lo, Math.max(M.l + lo, cx)), Math.max(M.t + STYLE.gate / 2 + 3, top[1] - STYLE.gate * 0.8));
+    } else if (sh.kind === 'range') {
+      const yb = M.t + H * 0.15; ctx.beginPath(); ctx.moveTo(sh.x0, M.t + H); ctx.lineTo(sh.x0, yb); ctx.lineTo(sh.x1, yb); ctx.lineTo(sh.x1, M.t + H); ctx.stroke();
+      label(txt, (sh.x0 + sh.x1) / 2, yb - STYLE.gate * 0.8);
+    } else if (sh.kind === 'quad') {
+      if (!quadDone.has(g.quadId)) { quadDone.add(g.quadId); ctx.beginPath(); ctx.moveTo(sh.cx, M.t); ctx.lineTo(sh.cx, M.t + H); ctx.moveTo(M.l, sh.cy); ctx.lineTo(M.l + W, sh.cy); ctx.stroke(); }
+      const d = STYLE.gate * 0.9; const pos = [[M.l + 4, M.t + d, 'left'], [M.l + W - 4, M.t + d, 'right'], [M.l + W - 4, M.t + H - d, 'right'], [M.l + 4, M.t + H - d, 'left']][sh.q];
+      label(p.showPct === false ? g.name.replace(/^Q\d: /, '') : `${g.name.replace(/^Q\d: /, '')} ${pct.toFixed(1)}`, pos[0], pos[1], pos[2]);
+    }
+  }
+  ctx.restore();
+}
 // ---------- plot interaction ----------
 function attachPlotEvents(p, cv) {
   const { W, H } = panelDims();
@@ -1363,12 +1421,12 @@ async function entriesToFiles(items) {
 }
 
 // ---------- workspace save/load ----------
-function workspaceJSON() { return { app: 'DrorLabFlow', version: 1, saved: new Date().toISOString(), transforms: S.transforms, comp: { enabled: S.comp.enabled, params: S.comp.params, matrix: S.comp.matrix }, markers: S.markers, gates: S.gates, plots: S.plots, stats: S.stats, samples: S.samples.map(s => s.fileName) }; }
+function workspaceJSON() { return { app: 'DrorLabFlow', version: 1, saved: new Date().toISOString(), transforms: S.transforms, comp: { enabled: S.comp.enabled, params: S.comp.params, matrix: S.comp.matrix }, markers: S.markers, gates: S.gates, plots: S.plots, stats: S.stats, layout: S.layout || null, samples: S.samples.map(s => s.fileName) }; }
 function loadWorkspace(w) {
   if (!w || w.app !== 'DrorLabFlow') throw new Error('not a Dror Lab Flow workspace');
   for (const k in w.transforms) if (S.transforms[k] || chan(k)) S.transforms[k] = w.transforms[k];
   S.comp.enabled = w.comp.enabled; if (w.comp.params && w.comp.params.length) { S.comp.params = w.comp.params; S.comp.matrix = w.comp.matrix; } S.comp.ver++;
-  S.markers = w.markers || S.markers || {};
+  S.markers = w.markers || S.markers || {}; S.layout = w.layout || S.layout || null;
   S.gates = w.gates || []; S.plots = (w.plots || []).filter(p => chan(p.x)); S.stats = w.stats || S.stats; S.selGate = null;
   rebuildT(); buildPlotPanels(); refreshAll();
 }
@@ -1480,6 +1538,7 @@ function plotMenu(p, x, y) {
   items.push('-', ...scaleItems(p.x, 'X')); if (p.y && p.kind !== 'hist') items.push(...scaleItems(p.y, 'Y'));
   items.push('-', { header: 'Axes' }, { label: 'Change X axis…', do: () => chanMenu(p, 'x', x, y) }, { label: 'Change Y axis…', do: () => chanMenu(p, 'y', x, y) });
   if (p.y && p.kind !== 'hist') items.push({ label: 'Swap X ⇄ Y', do: () => { [p.x, p.y] = [p.y, p.x]; buildPlotPanels(); renderAllPlots(); autosave(); } });
+  items.push('-', { header: 'Layout' }, { label: 'Add to layout (this sample)', do: () => plotToLayout(p, false) }, { label: 'Add to layout (one per sample)', do: () => plotToLayout(p, true) });
   items.push('-', { label: 'Duplicate plot', do: () => addPlot(Object.assign({}, p, { id: uid('p') })) }, { label: 'Save as PNG', do: async () => saveFile(`${curSample().name}.png`, await canvasBlob($('#pl-' + p.id + ' canvas'))) });
   popMenu(x, y, items);
 }
@@ -1618,6 +1677,241 @@ async function tsne(rows, perp, iters, onp) {
     if (it % 5 === 0) { onp(it, iters); await new Promise(r => setTimeout(r, 0)); }
   }
   const out = []; for (let i = 0; i < N; i++) out.push([Y[2 * i], Y[2 * i + 1]]); return out;
+}
+
+// ===================== Layout editor (FlowJo-style pages → PDF) =====================
+'use strict';
+const PAGE_PX = { A4: [794, 1123], Letter: [816, 1056] }; // portrait at 96 dpi
+const FONTS = { 'Arial': 'Arial, Helvetica, sans-serif', 'Helvetica': 'Helvetica, Arial, sans-serif', 'Times': '"Times New Roman", Times, serif', 'System': 'system-ui, -apple-system, Segoe UI, sans-serif' };
+function defaultLayout() { return { page: 'A4', orient: 'landscape', zoom: 0.8, pages: 1, grid: true, style: { tick: 9, label: 10, title: 11, gate: 9, fontName: 'Arial', lw: 1.2, axisLw: 1, gateBg: true, ticksBold: false }, items: [] }; }
+function LY() { if (!S.layout) S.layout = defaultLayout(); return S.layout; }
+let laySel = null;
+const pageSize = () => { const L = LY(); const [w, h] = PAGE_PX[L.page] || PAGE_PX.A4; return L.orient === 'landscape' ? [h, w] : [w, h]; };
+const sampleByName = n => S.samples.find(s => s.name === n);
+const snap = v => LY().grid ? Math.round(v / 5) * 5 : Math.round(v);
+
+// ---------- drawing one layout item into a context (logical px; caller sets scale) ----------
+function withLayoutStyle(fn) {
+  const L = LY(); const saveStyle = STYLE, saveM = Object.assign({}, M), saveV = V;
+  STYLE = Object.assign({}, STYLE_DEFAULT, L.style, { font: FONTS[L.style.fontName] || FONTS.Arial });
+  try { return fn(); } finally { STYLE = saveStyle; Object.assign(M, saveM); V = saveV; }
+}
+function itemTitle(it) {
+  if (it.title !== undefined && it.title !== null && it.title !== '') return it.title;
+  if (it.kind === 'overlay') return (gateById(it.pop) || { name: 'All events' }).name;
+  return `${it.sample || ''} · ${(gateById(it.pop) || { name: 'All events' }).name}`;
+}
+function drawLayoutItem(ctx, it, res) {
+  ctx.save(); ctx.translate(it.left, it.top); ctx.beginPath(); ctx.rect(0, 0, it.w, it.h); ctx.clip();
+  if (it.type === 'text') {
+    const st = LY().style; ctx.fillStyle = '#111'; ctx.font = `${it.bold ? 'bold ' : ''}${it.italic ? 'italic ' : ''}${it.size || 14}px ${FONTS[st.fontName] || FONTS.Arial}`;
+    ctx.textBaseline = 'top'; ctx.textAlign = it.align || 'left'; const x = it.align === 'center' ? it.w / 2 : it.align === 'right' ? it.w - 2 : 2;
+    const lines = []; for (const para of String(it.text || '').split('\n')) { let line = ''; for (const w of para.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > it.w - 4 && line) { lines.push(line); line = w; } else line = t; } lines.push(line); }
+    lines.forEach((l, i) => ctx.fillText(l, x, 2 + i * (it.size || 14) * 1.25)); ctx.restore(); return;
+  }
+  withLayoutStyle(() => {
+    const st = STYLE; const showTitle = it.showTitle !== false;
+    M.t = showTitle ? st.title + 10 : 8; M.r = 10; M.b = st.tick + st.label + 18; M.l = Math.round(st.tick * 3.6 + st.label + 16);
+    const W = Math.max(30, it.w - M.l - M.r), H = Math.max(30, it.h - M.t - M.b);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, it.w, it.h);
+    if (showTitle) { ctx.fillStyle = '#111'; ctx.font = `bold ${st.title}px ${st.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(itemTitle(it), M.l + W / 2, 3, it.w - 6); }
+    if (it.kind === 'overlay') { drawOverlayItem(ctx, it, W, H); return; }
+    const s = sampleByName(it.sample);
+    if (!s) { ctx.fillStyle = '#b42318'; ctx.font = `${st.label}px ${st.font}`; ctx.textAlign = 'center'; ctx.fillText(`Sample “${it.sample}” is not open`, it.w / 2, it.h / 2); return; }
+    const X = tdata(s, it.x); if (!X) { ctx.fillStyle = '#999'; ctx.fillText('Channel not in this sample', it.w / 2, it.h / 2); return; }
+    V = fixView(it, it.view) || FULLV; const idx = indices(s, it.pop);
+    const hist = it.kind === 'hist' || !it.y;
+    ctx.save(); ctx.beginPath(); ctx.rect(M.l, M.t, W, H); ctx.clip();
+    if (hist) { const hh = hist1d(X, idx, 256, true); let mx = 0; for (const v of hh) mx = Math.max(mx, v); const hc = it.hcol || '#888888'; drawHist(ctx, W, H, hh, mx * 1.05, '#222', hc + '99'); }
+    else { const Y = tdata(s, it.y); if (Y) render2D(ctx, W, H, X, Y, idx, it.kind, { cmap: it.cmap, dot: it.dot, res: res || 1 }); }
+    ctx.restore();
+    drawAxes(ctx, W, H, it.x, hist ? null : it.y, hist ? 'Count' : undefined);
+    if (it.showGates !== false) drawGates(ctx, it, s, W, H, idx.length, false);
+    if (it.showCount) { ctx.fillStyle = '#444'; ctx.font = `${st.tick}px ${st.font}`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(`n = ${idx.length.toLocaleString()}`, M.l + W - 3, M.t + H - 2); }
+  });
+  ctx.restore();
+}
+function drawOverlayItem(ctx, it, W, H) {
+  const st = STYLE; V = fixView(it, it.view) || FULLV;
+  const list = (it.samples || []).map(n => ({ s: sampleByName(n), n })).filter(o => o.s);
+  const curves = list.map((o, k) => { const X = tdata(o.s, it.x); if (!X) return null; const hh = hist1d(X, indices(o.s, it.pop), 200, true); let m = 0; for (const v of hh) m = Math.max(m, v); return { o, hh, m, col: (it.colors && it.colors[o.n]) || PALETTE[S.samples.indexOf(o.s) % PALETTE.length] }; }).filter(Boolean);
+  const gmax = Math.max(1, ...curves.map(c => c.m)); const n = curves.length; const step = n > 1 ? ((it.offset || 0) / 100) * H / (n - 1) : 0; const scale = 1 - step * (n - 1) / H;
+  ctx.save(); ctx.beginPath(); ctx.rect(M.l, M.t, W, H); ctx.clip();
+  for (let k = n - 1; k >= 0; k--) { const c = curves[k]; drawHist(ctx, W, H, c.hh, (it.norm !== false ? c.m : gmax) * 1.05, c.col, it.fill !== false ? c.col + '55' : null, k * step, scale); }
+  ctx.restore(); drawAxes(ctx, W, H, it.x, null, it.norm !== false ? '% of Max' : 'Count');
+  if (it.legend !== false && n) { ctx.font = `${st.tick}px ${st.font}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; let wmax = 0; curves.forEach(c => wmax = Math.max(wmax, ctx.measureText(c.o.n).width));
+    const lx = M.l + W - wmax - 22, ly = M.t + 6; ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(lx - 4, ly - 4, wmax + 26, n * (st.tick + 5) + 4);
+    curves.forEach((c, k) => { const y = ly + k * (st.tick + 5) + st.tick / 2; ctx.fillStyle = c.col; ctx.fillRect(lx, y - 4, 12, 8); ctx.fillStyle = '#111'; ctx.fillText(c.o.n, lx + 16, y); }); }
+}
+
+// ---------- adding items ----------
+function nextFreeSpot(w, h) {
+  const L = LY(); const [pw, ph] = pageSize(); const m = 30;
+  for (let pg = 0; pg < 50; pg++) {
+    for (let y = m; y + h <= ph - m; y += 10) for (let x = m; x + w <= pw - m; x += 10) {
+      const hit = L.items.some(o => o.page === pg && x < o.left + o.w + 10 && x + w + 10 > o.left && y < o.top + o.h + 10 && y + h + 10 > o.top);
+      if (!hit) { if (pg + 1 > L.pages) L.pages = pg + 1; return { page: pg, left: x, top: y }; }
+    }
+  }
+  return { page: L.pages++, left: m, top: m };
+}
+function addLayoutItem(o) {
+  const L = LY(); const it = Object.assign({ id: uid('L'), type: 'plot', w: 260, h: 250, kind: 'pseudo', showGates: true, showPct: true, showTitle: true }, o);
+  if (it.left === undefined) Object.assign(it, nextFreeSpot(it.w, it.h));
+  L.items.push(it); laySel = it.id; return it;
+}
+function plotToLayout(p, allSamples) {
+  const base = { pop: p.pop, x: p.x, y: (p.kind === 'hist' || !p.y) ? null : p.y, kind: p.kind === 'hist' || !p.y ? 'hist' : p.kind, cmap: p.cmap, dot: p.dot, hcol: p.hcol, view: p.view ? Object.assign({}, p.view) : null };
+  const list = allSamples ? S.samples.filter(s => s.include) : [curSample()];
+  for (const s of list) addLayoutItem(Object.assign({}, base, { sample: s.name }));
+  toast(allSamples ? `Added ${list.length} plots to the layout` : 'Added to the layout'); autosave();
+  if (activeTab === 'layout') renderLayout();
+}
+function batchFromItem(it) {
+  const L = LY(); const others = S.samples.filter(s => s.include && s.name !== it.sample);
+  for (const s of others) { const c = JSON.parse(JSON.stringify(it)); delete c.left; delete c.top; delete c.page; c.id = uid('L'); c.sample = s.name; c.title = (it.title && it.title !== '') ? '' : it.title; addLayoutItem(c); }
+  laySel = it.id; toast(`Added ${others.length} plots (one per included sample)`); renderLayout(); autosave();
+}
+
+// ---------- UI ----------
+function renderLayout() {
+  const L = LY(); const host = $('#laypages'); if (!host) return;
+  // toolbar values
+  $('#lay-page').value = L.page; $('#lay-orient').value = L.orient; $('#lay-zoom').value = String(L.zoom); $('#lay-grid').checked = !!L.grid;
+  const st = L.style; for (const k of ['tick', 'label', 'title', 'gate']) $('#lay-' + k).value = st[k]; $('#lay-font').value = st.fontName; $('#lay-lw').value = st.lw; $('#lay-gatebg').checked = st.gateBg !== false;
+  host.innerHTML = '';
+  const [pw, ph] = pageSize(); const z = L.zoom; const maxPage = Math.max(L.pages, ...L.items.map(i => i.page + 1), 1); L.pages = maxPage;
+  for (let pg = 0; pg < maxPage; pg++) {
+    const page = h('div', { class: 'lpage', style: `width:${pw * z}px;height:${ph * z}px`, 'data-page': pg, onpointerdown: e => { if (e.target === page) { laySel = null; renderLayoutProps(); $$('.litem').forEach(x => x.classList.remove('sel')); } } },
+      h('div', { class: 'lpnum' }, `Page ${pg + 1} of ${maxPage}`,
+        maxPage > 1 && !L.items.some(i => i.page === pg) ? h('button', { class: 'mini', title: 'Remove this empty page', onclick: () => { L.items.forEach(i => { if (i.page > pg) i.page--; }); L.pages--; renderLayout(); autosave(); } }, '×') : null));
+    for (const it of L.items.filter(i => i.page === pg)) page.append(layoutItemEl(it));
+    host.append(page);
+  }
+  host.append(h('button', { class: 'addpage', onclick: () => { L.pages++; renderLayout(); } }, '＋ Add page'));
+  renderLayoutProps();
+}
+function layoutItemEl(it) {
+  const z = LY().zoom; const cv = h('canvas');
+  const el = h('div', { class: 'litem' + (laySel === it.id ? ' sel' : ''), id: 'li-' + it.id, style: `left:${it.left * z}px;top:${it.top * z}px;width:${it.w * z}px;height:${it.h * z}px` }, cv, h('div', { class: 'lhandle' }));
+  drawItemCanvas(it, cv);
+  let drag = null;
+  el.addEventListener('pointerdown', e => {
+    e.stopPropagation(); el.setPointerCapture(e.pointerId); laySel = it.id; $$('.litem').forEach(x => x.classList.toggle('sel', x === el)); renderLayoutProps();
+    drag = { mode: e.target.classList.contains('lhandle') ? 'size' : 'move', x: e.clientX, y: e.clientY, o: { left: it.left, top: it.top, w: it.w, h: it.h } };
+  });
+  el.addEventListener('pointermove', e => {
+    if (!drag) return; const dx = (e.clientX - drag.x) / z, dy = (e.clientY - drag.y) / z; const [pw, ph] = pageSize();
+    if (drag.mode === 'move') { it.left = Math.max(0, Math.min(pw - it.w, snap(drag.o.left + dx))); it.top = Math.max(0, Math.min(ph - it.h, snap(drag.o.top + dy))); el.style.left = it.left * z + 'px'; el.style.top = it.top * z + 'px'; }
+    else { it.w = Math.max(it.type === 'text' ? 40 : 120, Math.min(pw - it.left, snap(drag.o.w + dx))); it.h = Math.max(it.type === 'text' ? 20 : 100, Math.min(ph - it.top, snap(drag.o.h + dy))); el.style.width = it.w * z + 'px'; el.style.height = it.h * z + 'px'; if (!drag.raf) drag.raf = requestAnimationFrame(() => { drag && (drag.raf = 0); drawItemCanvas(it, cv); }); }
+  });
+  el.addEventListener('pointerup', e => {
+    if (!drag) return; const moved = drag.mode; drag = null;
+    if (moved === 'move') { // drop onto another page if dragged there
+      const pages = $$('.lpage'); for (const pgEl of pages) { const r = pgEl.getBoundingClientRect(); if (e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left && e.clientX <= r.right) { const np = +pgEl.dataset.page; if (np !== it.page) { it.page = np; it.left = snap(Math.max(0, (e.clientX - r.left) / z - it.w / 2)); it.top = snap(Math.max(0, (e.clientY - r.top) / z - 20)); renderLayout(); } break; } } }
+    else drawItemCanvas(it, cv);
+    autosave();
+  });
+  el.addEventListener('dblclick', () => { if (it.type === 'text') { const ta = $('#lp-text'); ta && ta.focus(); } });
+  return el;
+}
+function drawItemCanvas(it, cv) {
+  const z = LY().zoom; const dpr = window.devicePixelRatio || 1; cv.width = Math.round(it.w * z * dpr); cv.height = Math.round(it.h * z * dpr); cv.style.width = it.w * z + 'px'; cv.style.height = it.h * z + 'px';
+  const ctx = cv.getContext('2d'); ctx.setTransform(z * dpr, 0, 0, z * dpr, 0, 0); ctx.clearRect(0, 0, it.w, it.h);
+  try { const o = Object.assign({}, it, { left: 0, top: 0 }); drawLayoutItem(ctx, o, Math.min(2, z * dpr)); } catch (e) { console.error(e); __showErr('layout: ' + e.message); }
+}
+function fitText(it) {
+  const c = document.createElement('canvas').getContext('2d'); const st = LY().style; const sz = it.size || 14;
+  c.font = `${it.bold ? 'bold ' : ''}${it.italic ? 'italic ' : ''}${sz}px ${FONTS[st.fontName] || FONTS.Arial}`;
+  let n = 0; for (const para of String(it.text || '').split('\n')) { let line = ''; n++; for (const w of para.split(' ')) { const t = line ? line + ' ' + w : w; if (c.measureText(t).width > it.w - 4 && line) { n++; line = w; } else line = t; } }
+  it.h = Math.max(it.h, Math.ceil(n * sz * 1.25 + 6));
+}
+function redrawItem(it) { const el = $('#li-' + it.id); if (el) { el.style.width = it.w * LY().zoom + 'px'; el.style.height = it.h * LY().zoom + 'px'; drawItemCanvas(it, el.querySelector('canvas')); } autosave(); }
+function renderLayoutProps() {
+  const host = $('#layprops'); host.innerHTML = ''; const L = LY(); const it = L.items.find(i => i.id === laySel);
+  if (!it) { host.append(h('div', { class: 'ct' }, 'Layout'), h('p', { class: 'muted small2' }, 'Click a plot to edit it. Drag to move, drag the corner to resize, Delete key removes.'),
+    h('p', { class: 'muted small2' }, 'Tip: right-click any plot in the Gating tab → “Add to layout” (this sample, or one per sample).')); return; }
+  const set = (k, v, rebuild) => { it[k] = v; if (rebuild) renderLayout(); else redrawItem(it); };
+  const row = (label, el) => h('label', { class: 'pr' }, h('span', {}, label), el);
+  const sel = (k, opts, rebuild) => h('select', { onchange: e => set(k, e.target.value || null, rebuild) }, opts.map(([v, l]) => h('option', { value: v, selected: (it[k] || '') === v }, l)));
+  const chk = (k, label, def = true) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: it[k] === undefined ? def : !!it[k], onchange: e => set(k, e.target.checked) }), label);
+  const num = (k, min, max, step) => h('input', { type: 'number', class: 'num', min, max, step: step || 1, value: it[k], onchange: e => set(k, +e.target.value, true) });
+  host.append(h('div', { class: 'ct' }, it.type === 'text' ? 'Text box' : it.kind === 'overlay' ? 'Overlay' : 'Plot'));
+  if (it.type === 'text') {
+    host.append(h('textarea', { id: 'lp-text', rows: 4, oninput: e => { it.text = e.target.value; fitText(it); redrawItem(it); } }, it.text || ''),
+      row('Size', h('input', { type: 'number', class: 'num', min: 6, max: 72, value: it.size || 14, onchange: e => { it.size = +e.target.value; fitText(it); renderLayout(); autosave(); } })), chk('bold', 'Bold', false), chk('italic', 'Italic', false), row('Align', sel('align', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']])));
+  } else {
+    const chans = S.channels.map(c => [c.name, chanLabel(c.name)]);
+    const pops = [['', 'All events'], ...popList().map(({ g, d }) => [g.id, ' '.repeat(d * 2) + g.name])];
+    if (it.kind !== 'overlay') host.append(row('Sample', sel('sample', S.samples.map(s => [s.name, s.name]))));
+    host.append(row('Population', sel('pop', pops)), row('Type', h('select', { onchange: e => { const v = e.target.value; it.kind = v; if (v === 'hist' || v === 'overlay') it.y = null; else if (!it.y) it.y = defaultAxes().y; if (v === 'overlay' && !it.samples) it.samples = S.samples.filter(s => s.include).map(s => s.name); renderLayout(); autosave(); } },
+      [['pseudo', 'Pseudocolor'], ['dot', 'Dot plot'], ['density', 'Density'], ['contour', 'Contour'], ['hist', 'Histogram'], ['overlay', 'Histogram overlay']].map(([v, l]) => h('option', { value: v, selected: it.kind === v }, l)))),
+      row('X axis', sel('x', chans)));
+    if (!['hist', 'overlay'].includes(it.kind)) host.append(row('Y axis', sel('y', chans)));
+    if (['pseudo', 'density'].includes(it.kind)) host.append(row('Colours', sel('cmap', Object.entries(CMAPS).map(([k, v]) => [k, v.label]))));
+    if (it.kind === 'dot') host.append(row('Dot colour', sel('dot', Object.keys(DOTCOLS).map(k => [k, k]))));
+    if (it.kind === 'hist') host.append(row('Fill', h('input', { type: 'color', value: it.hcol || '#888888', oninput: e => set('hcol', e.target.value) })));
+    host.append(row('Title', h('input', { type: 'text', value: it.title || '', placeholder: itemTitle(Object.assign({}, it, { title: '' })), oninput: e => set('title', e.target.value) })), chk('showTitle', 'Show title'));
+    if (it.kind === 'overlay') {
+      host.append(h('div', { class: 'ct', style: 'margin-top:8px' }, 'Samples'), ...S.samples.map((s, i) => h('label', { class: 'ck' }, h('input', { type: 'checkbox', checked: (it.samples || []).includes(s.name), onchange: e => { it.samples = e.target.checked ? [...(it.samples || []), s.name] : it.samples.filter(n => n !== s.name); redrawItem(it); } }),
+        h('input', { type: 'color', class: 'csw', value: (it.colors && it.colors[s.name]) || PALETTE[i % PALETTE.length], oninput: e => { it.colors = Object.assign({}, it.colors, { [s.name]: e.target.value }); redrawItem(it); } }), s.name)),
+        chk('norm', 'Normalize to mode'), chk('fill', 'Fill'), chk('legend', 'Legend'), row('Offset %', h('input', { type: 'range', min: 0, max: 80, value: it.offset || 0, oninput: e => set('offset', +e.target.value) })));
+    } else host.append(chk('showGates', 'Show gates'), chk('showPct', 'Show gate %'), chk('showCount', 'Show event count', false));
+    if (it.view) host.append(h('button', { onclick: () => set('view', null) }, 'Reset zoom'));
+    if (it.kind !== 'overlay') host.append(h('button', { class: 'pri', style: 'margin-top:8px', title: 'Copy this plot for every included sample', onclick: () => batchFromItem(it) }, 'Batch: one per sample'));
+  }
+  host.append(h('div', { class: 'ct', style: 'margin-top:10px' }, 'Size & position'),
+    h('div', { class: 'row', style: 'flex-wrap:wrap;gap:4px' }, ...['w', 'h', 'left', 'top'].map(k => h('label', { class: 'pr sm' }, h('span', {}, { w: 'W', h: 'H', left: 'X', top: 'Y' }[k]), num(k, 0, 2000)))),
+    h('div', { class: 'row', style: 'margin-top:6px;gap:4px' },
+      h('button', { onclick: () => { const c = JSON.parse(JSON.stringify(it)); c.id = uid('L'); delete c.left; delete c.top; delete c.page; addLayoutItem(c); renderLayout(); autosave(); } }, 'Duplicate'),
+      h('button', { onclick: () => { const same = L.items.filter(o => o.type === it.type && o.id !== it.id); same.forEach(o => { o.w = it.w; o.h = it.h; }); renderLayout(); autosave(); toast('Applied this size to all ' + (it.type === 'text' ? 'text boxes' : 'plots')); } }, 'Same size for all'),
+      h('button', { class: 'danger', onclick: () => { L.items = L.items.filter(o => o !== it); laySel = null; renderLayout(); autosave(); } }, 'Delete')));
+}
+function layoutStyleChanged() {
+  const L = LY(); const st = L.style; for (const k of ['tick', 'label', 'title', 'gate']) st[k] = +$('#lay-' + k).value || st[k];
+  st.fontName = $('#lay-font').value; st.lw = +$('#lay-lw').value || 1.2; st.gateBg = $('#lay-gatebg').checked;
+  L.page = $('#lay-page').value; L.orient = $('#lay-orient').value; L.zoom = +$('#lay-zoom').value; L.grid = $('#lay-grid').checked;
+  const [pw, ph] = pageSize(); L.items.forEach(i => { i.w = Math.min(i.w, pw); i.h = Math.min(i.h, ph); i.left = Math.min(i.left, pw - i.w); i.top = Math.min(i.top, ph - i.h); });
+  renderLayout(); autosave();
+}
+function arrangeGrid() {
+  const L = LY(); const [pw, ph] = pageSize(); const m = 30, gap = 12; const items = L.items.filter(i => i.type === 'plot').sort((a, b) => a.page - b.page || a.top - b.top || a.left - b.left);
+  if (!items.length) return; const w = items[0].w, hgt = items[0].h; const cols = Math.max(1, Math.floor((pw - 2 * m + gap) / (w + gap))), rows = Math.max(1, Math.floor((ph - 2 * m + gap) / (hgt + gap)));
+  items.forEach((it, k) => { const per = cols * rows; const pg = Math.floor(k / per), r = Math.floor((k % per) / cols), c = k % cols; it.page = pg; it.w = w; it.h = hgt; it.left = m + c * (w + gap); it.top = m + r * (hgt + gap); });
+  L.items.filter(i => i.type === 'text').forEach(i => { i.page = Math.min(i.page, Math.ceil(items.length / (cols * rows)) - 1); });
+  L.pages = Math.ceil(items.length / (cols * rows)); renderLayout(); autosave();
+}
+// ---------- export ----------
+function renderPageCanvas(pg, k) {
+  const [pw, ph] = pageSize(); const cv = document.createElement('canvas'); cv.width = Math.round(pw * k); cv.height = Math.round(ph * k);
+  const ctx = cv.getContext('2d'); ctx.setTransform(k, 0, 0, k, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, pw, ph);
+  for (const it of LY().items.filter(i => i.page === pg)) drawLayoutItem(ctx, it, Math.min(3, k));
+  return cv;
+}
+let _jspdf = null;
+function loadJsPDF() {
+  if (window.jspdf) return Promise.resolve(window.jspdf);
+  if (_jspdf) return _jspdf;
+  _jspdf = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; sc.onload = () => res(window.jspdf); sc.onerror = () => { _jspdf = null; rej(new Error('Could not load the PDF library (needs internet)')); }; document.head.append(sc); });
+  return _jspdf;
+}
+async function exportLayoutPDF() {
+  const L = LY(); if (!L.items.length) { toast('The layout is empty'); return; }
+  try {
+    progress('Preparing PDF…', 0); const { jsPDF } = await loadJsPDF();
+    const [pw, ph] = pageSize(); const doc = new jsPDF({ orientation: L.orient, unit: 'pt', format: [pw * 0.75, ph * 0.75] });
+    const pages = Math.max(L.pages, ...L.items.map(i => i.page + 1));
+    for (let pg = 0; pg < pages; pg++) {
+      progress(`Rendering page ${pg + 1} of ${pages}…`, pg / pages); await new Promise(r => setTimeout(r, 20));
+      if (pg) doc.addPage([pw * 0.75, ph * 0.75], L.orient);
+      const cv = renderPageCanvas(pg, 300 / 96); doc.addImage(cv.toDataURL('image/png'), 'PNG', 0, 0, pw * 0.75, ph * 0.75, undefined, 'FAST');
+    }
+    progressDone(); await saveFile(`layout_${new Date().toISOString().slice(0, 10)}.pdf`, doc.output('blob'));
+  } catch (e) { progressDone(); toast(e.message || String(e), 6000); }
+}
+async function exportLayoutPNG() {
+  const L = LY(); const pages = Math.max(L.pages, ...L.items.map(i => i.page + 1), 1);
+  for (let pg = 0; pg < pages; pg++) { if (!L.items.some(i => i.page === pg)) continue; const cv = renderPageCanvas(pg, 300 / 96); await saveFile(`layout_page${pg + 1}.png`, await canvasBlob(cv)); }
 }
 
 // ===================== lab accounts + cloud experiments (Supabase, shared with Lab Counter) =====================
@@ -1770,7 +2064,7 @@ function progress(text, frac) { let el = $('#cloudprog'); if (!el) { el = h('div
 const progressDone = () => { const el = $('#cloudprog'); el && el.remove(); };
 
 function resetData() {
-  S.samples = []; S.channels = []; S.transforms = {}; S.T = {}; S.gates = []; S.plots = []; S.markers = {}; S.cur = 0; S.selGate = null;
+  S.samples = []; S.channels = []; S.transforms = {}; S.T = {}; S.gates = []; S.plots = []; S.markers = {}; S.layout = null; S.cur = 0; S.selGate = null;
   S.comp = { enabled: false, params: [], matrix: [], ver: (S.comp.ver || 1) + 1 }; S.stats = { pops: [], chans: [], kinds: ['count', 'pctParent', 'median'] };
   OV.sel = null; OV.pop = null; DR.sel = null; DR.result = null; DR.params = null; bump();
 }
@@ -1862,6 +2156,13 @@ window.addEventListener('drop', async e => { e.preventDefault(); if (e.dataTrans
 window.addEventListener('keydown', e => {
   if (e.target.matches('input,select,textarea')) return;
   if (!S.samples.length) return;
+  if (activeTab === 'layout') {
+    const it = LY().items.find(i => i.id === laySel); if (!it) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); LY().items = LY().items.filter(o => o !== it); laySel = null; renderLayout(); autosave(); return; }
+    const d = e.shiftKey ? 10 : 1; const mv = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+    if (mv) { e.preventDefault(); it.left += mv[0]; it.top += mv[1]; const el = $('#li-' + it.id); if (el) { el.style.left = it.left * LY().zoom + 'px'; el.style.top = it.top * LY().zoom + 'px'; } autosave(); }
+    return;
+  }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); S.cur = (S.cur + (e.key === 'ArrowDown' ? 1 : -1) + S.samples.length) % S.samples.length; refreshAll(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && S.selGate) { e.preventDefault(); deleteGate(S.selGate); }
   else if (e.key === 'Escape') setTool('select');
